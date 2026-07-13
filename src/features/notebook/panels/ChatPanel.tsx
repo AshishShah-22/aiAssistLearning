@@ -431,14 +431,13 @@ export default function ChatPanel() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Chat store
+  // Chat store — NOTE: we intentionally avoid subscribing to messages
+  // from the Zustand store to prevent infinite re-render loops.
   const {
     activeChatId,
     setActiveChat,
-    addMessage,
     setStreaming,
     isStreaming,
-    setMessages: setStoreMessages,
   } = useChatStore();
 
   // Fetch chats list
@@ -459,15 +458,9 @@ export default function ChatPanel() {
     enabled: !!activeChatId && !isStreaming,
   });
 
-  // Merge server messages with local optimistic messages
+  // Display: use local optimistic messages while streaming,
+  // otherwise use server-fetched messages. No store sync needed.
   const displayMessages = isStreaming ? localMessages : (messages ?? []);
-
-  // Update store when server messages arrive
-  useEffect(() => {
-    if (messages && !isStreaming) {
-      setStoreMessages(messages);
-    }
-  }, [messages, isStreaming, setStoreMessages]);
 
   // Create chat mutation
   const createChatMutation = useMutation({
@@ -536,19 +529,23 @@ export default function ChatPanel() {
 
   // Auto-scroll to bottom
   const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      const viewport = scrollRef.current.querySelector(
-        '[data-slot="scroll-area-viewport"]'
-      );
-      if (viewport) {
-        viewport.scrollTop = viewport.scrollHeight;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        const viewport = scrollRef.current.querySelector(
+          '[data-slot="scroll-area-viewport"]'
+        );
+        if (viewport) {
+          viewport.scrollTop = viewport.scrollHeight;
+        }
       }
-    }
+    });
   }, []);
 
+  // Scroll on new messages — use message count to avoid object-ref loops
+  const messageCount = displayMessages.length;
   useEffect(() => {
     scrollToBottom();
-  }, [displayMessages, isStreaming, scrollToBottom]);
+  }, [messageCount, isStreaming, scrollToBottom]);
 
   // Auto-resize textarea
   useEffect(() => {

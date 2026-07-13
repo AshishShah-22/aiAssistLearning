@@ -156,8 +156,7 @@ export async function POST(
     }
 
     return NextResponse.json({
-      userMessage,
-      assistantMessage,
+      messages: [userMessage, assistantMessage],
     });
   } catch (error) {
     console.error('Error sending message:', error);
