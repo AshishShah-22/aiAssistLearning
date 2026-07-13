@@ -152,3 +152,57 @@ All engines:
 ✅ Page compiles to 35KB of valid HTML
 ✅ Database schema with 18 normalized models
 ✅ 6 independent AI engines with retry logic
+
+---
+
+## Task 1-3: Backend Auth System
+
+### Summary
+Added a complete session-based authentication system with cookie-based sessions, password hashing via Node.js built-in `crypto.scrypt`, and 4 API endpoints for register/login/session/me.
+
+### Changes Made
+
+#### 1. Database Schema (`prisma/schema.prisma`)
+- Added `password String` field to User model (required field, after `email`)
+- Used `prisma db execute` to add column with default `__dummy_no_login__` for existing dummy user
+- Ran `db:push` to synchronize Prisma client
+
+#### 2. Updated `src/lib/db.ts`
+- Added `password: '__dummy_no_login__'` to the dummy user creation in `ensureUser()`
+
+#### 3. Created `src/lib/auth.ts` — Auth Helper Utilities
+- `hashPassword(password)` — scrypt-based hashing with random 16-byte salt, format: `salt:key`
+- `verifyPassword(password, hash)` — splits stored hash, re-derives key, compares
+- `getCurrentUser()` — reads `session` cookie, decodes base64 payload, validates 30-day expiry, queries DB
+- `createSessionToken(user)` — encodes `id|||email|||name|||timestamp` as base64
+- `SESSION_COOKIE_OPTIONS` — shared cookie config: httpOnly, secure:false, sameSite:'lax', path:'/', maxAge:30 days
+
+#### 4. Created `src/lib/with-auth.ts` — Auth Middleware Wrapper
+- `withAuth(request)` — returns `{ error, user }`; error is a 401 NextResponse if no valid session
+
+#### 5. Created API Routes (4 endpoints)
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/auth/register` | Register with name/email/password, migrate dummy-user notebooks |
+| POST | `/api/auth/login` | Login with email/password, block dummy user login |
+| GET | `/api/auth/session` | Get current user from cookie (or null) |
+| DELETE | `/api/auth/session` | Logout — clears session cookie |
+| GET | `/api/auth/me` | Get current user or 401 |
+
+#### 6. Notebook Migration Logic
+- On first real user registration, all notebooks/studySessions/quizAttempts belonging to dummy user (`user-1`) are migrated to the new user's ID
+- This ensures existing data created before auth is properly owned
+
+#### Validation Rules
+- Email format validation via regex
+- Password minimum 6 characters
+- Duplicate email returns 409 Conflict
+- Dummy user cannot log in (password is sentinel value)
+- Generic "Invalid email or password" for login failures (no user enumeration)
+- All errors return proper HTTP status codes (400, 401, 409, 500)
+
+### Verified
+✅ ESLint passes with zero errors
+✅ All auth API routes compile and serve correctly
+✅ Session cookie set with correct options

@@ -26,6 +26,7 @@ export async function ensureUser() {
         id: DUMMY_USER_ID,
         name: 'Demo User',
         email: 'demo@studyai.app',
+        password: '__dummy_no_login__',
       },
     });
     _userEnsured = true;

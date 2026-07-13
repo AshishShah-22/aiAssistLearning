@@ -11,12 +11,21 @@ import {
   TrendingUp,
   Sparkles,
   BookMarked,
+  LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAppStore } from '@/stores';
+import { useAppStore, useAuthStore } from '@/stores';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import NotebookCard from './NotebookCard';
 import type { Notebook, DashboardStats } from '@/types';
 
@@ -58,6 +67,8 @@ const statCards = [
 export default function Dashboard() {
   const setView = useAppStore((s) => s.setView);
   const openNotebook = useAppStore((s) => s.openNotebook);
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
   const [searchQuery, setSearchQuery] = useState('');
 
   const { data: notebooks, isLoading: notebooksLoading } = useQuery<Notebook[]>({
@@ -106,12 +117,31 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="ml-auto">
+            <div className="flex items-center gap-2 ml-auto">
               <Button onClick={() => setView('setup')} size="sm" className="gap-1.5">
                 <Plus className="w-4 h-4" />
                 <span className="hidden sm:inline">Create Notebook</span>
                 <span className="sm:hidden">New</span>
               </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors" aria-label="User menu">
+                    <UserIcon className="size-4 text-primary" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="px-2 py-1.5">
+                    <p className="text-sm font-medium truncate">{user?.name || 'User'}</p>
+                    <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive gap-2">
+                    <LogOut className="size-4" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 

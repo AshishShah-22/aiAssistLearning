@@ -1,6 +1,35 @@
 import { create } from "zustand";
 import type { Notebook, AppView, SidebarPanel, Chat, Message, Unit, Topic } from "@/types";
 
+// ─── Auth Store ──────────────────────────────────────
+export interface AuthUser {
+  id: string;
+  name: string | null;
+  email: string;
+  avatar: string | null;
+}
+
+interface AuthState {
+  user: AuthUser | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  setUser: (user: AuthUser | null) => void;
+  setLoading: (loading: boolean) => void;
+  logout: () => void;
+}
+
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: true,
+  setUser: (user) => set({ user, isAuthenticated: !!user, isLoading: false }),
+  setLoading: (loading) => set({ isLoading: loading }),
+  logout: () => {
+    fetch('/api/auth/session', { method: 'DELETE' }).catch(() => {});
+    set({ user: null, isAuthenticated: false });
+  },
+}));
+
 // ─── App Store (global navigation) ────────────────────
 interface AppState {
   view: AppView;

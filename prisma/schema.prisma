@@ -12,6 +12,7 @@ model User {
   id             String   @id @default(cuid())
   name           String?
   email          String   @unique
+  password       String
   avatar         String?
   timezone       String   @default("Asia/Calcutta")
   createdAt      DateTime @default(now())
