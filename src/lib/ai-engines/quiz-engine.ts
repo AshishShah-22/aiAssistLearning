@@ -1,4 +1,4 @@
-import ZAI from 'z-ai-web-dev-sdk';
+import { aiChat } from '@/lib/ai-provider';
 import type { QuizGeneration, QuestionType, Difficulty } from '@/types';
 
 // ─── Prompts ───────────────────────────────────────────
@@ -79,16 +79,12 @@ ${contextBlock}`;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const zai = await ZAI.create();
-      const completion = await zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: QUIZ_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        thinking: { type: 'disabled' },
-      });
+      const response = await aiChat([
+        { role: 'system', content: QUIZ_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ]);
 
-      const raw = completion.choices[0]?.message?.content;
+      const raw = response.content;
       if (!raw) {
         throw new Error('AI returned an empty response for quiz generation');
       }

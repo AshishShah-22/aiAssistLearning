@@ -1,4 +1,4 @@
-import ZAI from 'z-ai-web-dev-sdk';
+import { aiChat } from '@/lib/ai-provider';
 import type { SyllabusAnalysis } from '@/types';
 
 // ─── Prompts ───────────────────────────────────────────
@@ -46,16 +46,12 @@ export async function analyzeSyllabus(syllabusText: string): Promise<SyllabusAna
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const zai = await ZAI.create();
-      const completion = await zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: SYLLABUS_SYSTEM_PROMPT },
-          { role: 'user', content: syllabusText },
-        ],
-        thinking: { type: 'disabled' },
-      });
+      const response = await aiChat([
+        { role: 'system', content: SYLLABUS_SYSTEM_PROMPT },
+        { role: 'user', content: syllabusText },
+      ]);
 
-      const raw = completion.choices[0]?.message?.content;
+      const raw = response.content;
       if (!raw) {
         throw new Error('AI returned an empty response for syllabus analysis');
       }

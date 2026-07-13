@@ -1,4 +1,4 @@
-import ZAI from 'z-ai-web-dev-sdk';
+import { aiChat } from '@/lib/ai-provider';
 
 // ─── Prompts ───────────────────────────────────────────
 const TUTORING_SYSTEM_PROMPT = `You are an expert AI tutor for the subject defined in the syllabus. You have access to the student's uploaded materials, notes, and quiz history. Answer questions using the notebook knowledge. Provide citations when referencing specific documents or topics. Be encouraging, clear, and thorough.
@@ -52,8 +52,8 @@ export async function generateTutorResponse(params: {
     content: msg.content,
   }));
 
-  const messages: { role: string; content: string }[] = [
-    { role: 'assistant', content: TUTORING_SYSTEM_PROMPT },
+  const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+    { role: 'system', content: TUTORING_SYSTEM_PROMPT },
   ];
 
   // Add context as a user message so the model can reference it
@@ -76,13 +76,9 @@ export async function generateTutorResponse(params: {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const zai = await ZAI.create();
-      const completion = await zai.chat.completions.create({
-        messages,
-        thinking: { type: 'disabled' },
-      });
+      const response = await aiChat(messages);
 
-      const raw = completion.choices[0]?.message?.content;
+      const raw = response.content;
       if (!raw) {
         throw new Error('AI returned an empty response for tutoring');
       }

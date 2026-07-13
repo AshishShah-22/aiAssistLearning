@@ -1,4 +1,4 @@
-import ZAI from 'z-ai-web-dev-sdk';
+import { aiChat } from '@/lib/ai-provider';
 
 // ─── Prompts ───────────────────────────────────────────
 const NOTE_SYSTEM_PROMPT = `You are an expert at creating study notes. Generate well-structured, comprehensive study notes based on the provided topic content and reference materials.
@@ -63,16 +63,12 @@ ${contextBlock}`;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const zai = await ZAI.create();
-      const completion = await zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: NOTE_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        thinking: { type: 'disabled' },
-      });
+      const response = await aiChat([
+        { role: 'system', content: NOTE_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ]);
 
-      const raw = completion.choices[0]?.message?.content;
+      const raw = response.content;
       if (!raw) {
         throw new Error('AI returned an empty response for note generation');
       }
