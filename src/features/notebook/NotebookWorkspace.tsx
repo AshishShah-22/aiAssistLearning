@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAppStore, useNotebookStore } from '@/stores';
 import { NotebookHeader } from './NotebookHeader';
 import { NotebookSidebar } from './NotebookSidebar';
@@ -14,7 +14,10 @@ export function NotebookWorkspace() {
   const setNotebook = useNotebookStore((s) => s.setNotebook);
   const setUnits = useNotebookStore((s) => s.setUnits);
   const reset = useNotebookStore((s) => s.reset);
-  const queryClient = useQueryClient();
+
+  // Track which notebook ID we've already synced — prevents re-sync loops
+  const syncedNotebookId = useRef<string | null>(null);
+  const lastOpenedUpdated = useRef<string | null>(null);
 
   // Fetch notebook data
   const { data: notebookData, isLoading, error } = useQuery<Notebook>({
@@ -30,31 +33,34 @@ export function NotebookWorkspace() {
     enabled: view === 'notebook' && !!currentNotebookId,
   });
 
-  // Update lastOpenedAt when notebook is loaded
-  const updateLastOpened = useMutation({
-    mutationFn: async (id: string) => {
-      await fetch(`/api/notebooks/${id}`, {
+  // Sync notebook data to store — only ONCE per notebook open
+  useEffect(() => {
+    if (notebookData && currentNotebookId !== syncedNotebookId.current) {
+      syncedNotebookId.current = currentNotebookId;
+      setNotebook(notebookData);
+      setUnits(notebookData.units ?? []);
+    }
+  }, [notebookData, currentNotebookId, setNotebook, setUnits]);
+
+  // Update lastOpenedAt — only ONCE per notebook open (fire and forget)
+  useEffect(() => {
+    if (currentNotebookId && currentNotebookId !== lastOpenedUpdated.current) {
+      lastOpenedUpdated.current = currentNotebookId;
+      // Fire in background, don't care about result
+      fetch(`/api/notebooks/${currentNotebookId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lastOpenedAt: new Date().toISOString() }),
-      });
-    },
-  });
-
-  // Sync notebook data to store
-  useEffect(() => {
-    if (notebookData) {
-      setNotebook(notebookData);
-      setUnits(notebookData.units ?? []);
-      // Update lastOpenedAt in background
-      updateLastOpened.mutate(notebookData.id);
+      }).catch(() => {});
     }
-  }, [notebookData, setNotebook, setUnits, updateLastOpened]);
+  }, [currentNotebookId]);
 
   // Reset store when leaving notebook view
   useEffect(() => {
     if (view !== 'notebook') {
       reset();
+      syncedNotebookId.current = null;
+      lastOpenedUpdated.current = null;
     }
   }, [view, reset]);
 

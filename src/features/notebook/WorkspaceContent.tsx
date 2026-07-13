@@ -2,7 +2,16 @@
 
 import { useAppStore } from '@/stores';
 import dynamic from 'next/dynamic';
-import { Suspense } from 'react';
+
+export function WorkspaceContent() {
+  const sidebarPanel = useAppStore((s) => s.sidebarPanel);
+
+  return (
+    <main className="flex-1 overflow-hidden" role="main" aria-label="Workspace content">
+      <PanelRouter panel={sidebarPanel} />
+    </main>
+  );
+}
 
 function PanelFallback() {
   return (
@@ -12,18 +21,6 @@ function PanelFallback() {
         <span className="text-sm">Loading panel...</span>
       </div>
     </div>
-  );
-}
-
-export function WorkspaceContent() {
-  const sidebarPanel = useAppStore((s) => s.sidebarPanel);
-
-  return (
-    <main className="flex-1 overflow-hidden" role="main" aria-label="Workspace content">
-      <Suspense fallback={<PanelFallback />}>
-        <PanelRouter panel={sidebarPanel} />
-      </Suspense>
-    </main>
   );
 }
 
