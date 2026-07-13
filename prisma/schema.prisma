@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── User ─────────────────────────────────────────────
+model User {
+  id             String   @id @default(cuid())
+  name           String?
+  email          String   @unique
+  avatar         String?
+  timezone       String   @default("Asia/Calcutta")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  notebooks      Notebook[]
+  studySessions  StudySession[]
+  quizAttempts   QuizAttempt[]
+
+  @@index([email])
+}
+
+// ─── Notebook ─────────────────────────────────────────
+model Notebook {
+  id               String   @id @default(cuid())
+  userId           String
+  name             String
+  description      String?
+  color            String   @default("#10b981")  // emerald by default
+  status           String   @default("setup")    // setup | active | completed | archived
+  currentUnitId    String?
+  currentTopicId   String?
+  lastOpenedAt     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  units            Unit[]
+  documents        Document[]
+  chats            Chat[]
+  notes            Note[]
+  flashcardDecks   FlashcardDeck[]
+  quizzes          Quiz[]
+  studySessions    StudySession[]
+  resources        Resource[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ─── Unit ─────────────────────────────────────────────
+model Unit {
+  id           String   @id @default(cuid())
+  notebookId   String
+  title        String
+  description  String?
+  order        Int      @default(0)
+  status       String   @default("not_started")  // not_started | in_progress | completed
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  notebook     Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  topics       Topic[]
+
+  @@index([notebookId])
+  @@index([order])
+}
+
+// ─── Topic ────────────────────────────────────────────
+model Topic {
+  id           String   @id @default(cuid())
+  unitId       String
+  title        String
+  description  String?
+  content      String?   // AI-generated detailed content
+  difficulty   String   @default("medium")  // easy | medium | hard
+  order        Int      @default(0)
+  status       String   @default("not_started")  // not_started | in_progress | completed
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  unit         Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  resources    Resource[]
+  flashcards   Flashcard[]
+
+  @@index([unitId])
+  @@index([order])
+}
+
+// ─── Document ─────────────────────────────────────────
+model Document {
+  id           String   @id @default(cuid())
+  notebookId   String
+  filename     String
+  fileType     String   // pdf | docx | txt | md
+  fileSize     Int      // bytes
+  content      String?  // extracted text
+  status       String   @default("processing")  // processing | ready | error
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  notebook     Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+
+  @@index([notebookId])
+  @@index([status])
+}
+
+// ─── Chat ─────────────────────────────────────────────
+model Chat {
+  id           String   @id @default(cuid())
+  notebookId   String
+  title        String   @default("New Chat")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  notebook     Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  messages     Message[]
+
+  @@index([notebookId])
+  @@index([updatedAt])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  chatId    String
+  role      String   // user | assistant | system
+  content   String
+  citations String?  // JSON array of citation references
+  createdAt DateTime @default(now())
+
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+  @@index([createdAt])
+}
+
+// ─── Note ─────────────────────────────────────────────
+model Note {
+  id           String   @id @default(cuid())
+  notebookId   String
+  topicId      String?
+  title        String
+  content      String   // markdown content
+  type         String   @default("general")  // general | summary | exam | revision | formula
+  isAiGenerated Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  notebook     Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+
+  @@index([notebookId])
+  @@index([topicId])
+}
+
+// ─── Flashcard Deck ───────────────────────────────────
+model FlashcardDeck {
+  id           String      @id @default(cuid())
+  notebookId   String
+  topicId      String?
+  title        String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  notebook     Notebook    @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  flashcards   Flashcard[]
+
+  @@index([notebookId])
+}
+
+model Flashcard {
+  id             String         @id @default(cuid())
+  deckId         String
+  topicId        String?
+  front          String         // question / term
+  back           String         // answer / definition
+  type           String         @default("qa")  // qa | definition | formula | concept | example
+  difficulty     String         @default("medium")
+  reviewCount    Int            @default(0)
+  correctCount   Int            @default(0)
+  lastReviewedAt DateTime?
+  nextReviewAt   DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  deck           FlashcardDeck  @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  topic          Topic?         @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@index([deckId])
+  @@index([topicId])
+  @@index([nextReviewAt])
+}
+
+// ─── Quiz ─────────────────────────────────────────────
+model Quiz {
+  id           String   @id @default(cuid())
+  notebookId   String
+  title        String
+  scope        String   // topic | unit | syllabus | weak_areas
+  scopeRefId   String?  // topicId or unitId if applicable
+  difficulty   String   @default("medium")
+  questionCount Int
+  createdAt    DateTime @default(now())
+
+  notebook     Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  questions    Question[]
+  attempts     QuizAttempt[]
+
+  @@index([notebookId])
+}
+
+model Question {
+  id           String   @id @default(cuid())
+  quizId       String
+  type         String   // mcq | true_false | short_answer | long_answer | coding
+  question     String
+  options      String?  // JSON array for MCQ
+  correctAnswer String
+  explanation  String?
+  difficulty   String   @default("medium")
+  order        Int      @default(0)
+  topicId      String?
+
+  quiz         Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([quizId])
+  @@index([order])
+}
+
+model QuizAttempt {
+  id           String   @id @default(cuid())
+  quizId       String
+  userId       String
+  answers      String   // JSON: { questionId: answer }
+  score        Float
+  totalQuestions Int
+  timeSpent    Int      // seconds
+  createdAt    DateTime @default(now())
+
+  quiz         Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([quizId])
+  @@index([userId])
+}
+
+// ─── Resource ─────────────────────────────────────────
+model Resource {
+  id           String   @id @default(cuid())
+  notebookId   String
+  topicId      String?
+  title        String
+  url          String?
+  type         String   // book | paper | documentation | video | article | blog | practice | uploaded
+  description  String?
+  source       String?
+  isAutoFound  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  notebook     Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  topic        Topic?   @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@index([notebookId])
+  @@index([topicId])
+}
+
+// ─── Study Session ────────────────────────────────────
+model StudySession {
+  id           String   @id @default(cuid())
+  notebookId   String
+  userId       String
+  topicId      String?
+  activityType String   // read | quiz | chat | flashcard | revision | notes
+  duration     Int      // seconds
+  metadata     String?  // JSON for additional data
+  createdAt    DateTime @default(now())
+
+  notebook     Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([notebookId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ─── Progress (aggregated per unit/topic) ─────────────
+model Progress {
+  id           String   @id @default(cuid())
+  notebookId   String
+  targetId     String   // unitId or topicId
+  targetType   String   // unit | topic
+  percentComplete Float  @default(0)
+  resourcesRead Int     @default(0)
+  quizzesTaken Int     @default(0)
+  avgQuizScore Float   @default(0)
+  studyMinutes Int     @default(0)
+  lastActivityAt DateTime?
+  updatedAt    DateTime @updatedAt
+
+  @@unique([targetId])
+  @@index([notebookId])
+  @@index([targetType])
+}
