@@ -85,7 +85,14 @@ export async function generateTutorResponse(params: {
 
       // Strip markdown code fences if present
       const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-      const parsed = JSON.parse(cleaned);
+      let parsed: { content: string; citations: string[] };
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        parsed = { content: cleaned, citations: [] }; // Fallback if JSON parsing fails
+
+      }
+      
 
       if (!parsed.content || typeof parsed.content !== 'string') {
         throw new Error('Parsed tutoring response missing "content" field');
