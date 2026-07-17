@@ -212,6 +212,10 @@ function MessageBubble({ message }: { message: Message }) {
     ? JSON.parse(message.citations)
     : [];
 
+  const images: { url: string; caption: string }[] = message.images
+    ? JSON.parse(message.images)
+    : [];
+
   const timeStr = message.createdAt
     ? formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })
     : '';
@@ -265,6 +269,28 @@ function MessageBubble({ message }: { message: Message }) {
             </div>
           )}
         </div>
+
+        {/* Images */}
+        {!isUser && images.length > 0 && (
+          <div className="flex flex-col gap-2 mt-2">
+            {images.map((img, i) => (
+              <div key={i} className="rounded-lg overflow-hidden border bg-card">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={img.url}
+                  alt={img.caption || 'Diagram'}
+                  className="w-full max-h-64 object-contain bg-white"
+                  loading="lazy"
+                />
+                {img.caption && (
+                  <p className="text-[11px] text-muted-foreground px-2 py-1.5 border-t bg-muted/30">
+                    {img.caption}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Citations */}
         {!isUser && citations.length > 0 && (
@@ -528,15 +554,10 @@ export default function ChatPanel() {
   });
 
   // Auto-scroll to bottom
-  const scrollToBottom = useCallback(() => {
+    const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
       if (scrollRef.current) {
-        const viewport = scrollRef.current.querySelector(
-          '[data-slot="scroll-area-viewport"]'
-        );
-        if (viewport) {
-          viewport.scrollTop = viewport.scrollHeight;
-        }
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
     });
   }, []);
@@ -672,8 +693,8 @@ export default function ChatPanel() {
         {!activeChatId ? (
           <WelcomeScreen onSend={(text) => handleSend(text)} />
         ) : (
-          <ScrollArea className="flex-1" ref={scrollRef}>
-            <div className="p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto" ref={scrollRef as React.RefObject<HTMLDivElement>}>
+            <div className="p-4 space-y-4 max-w-3xl mx-auto">
               {messagesLoading && displayMessages.length === 0 ? (
                 <div className="space-y-4">
                   {[1, 2].map((i) => (
@@ -714,7 +735,7 @@ export default function ChatPanel() {
                 </motion.div>
               )}
             </div>
-          </ScrollArea>
+          </div>
         )}
 
         {/* Input area */}

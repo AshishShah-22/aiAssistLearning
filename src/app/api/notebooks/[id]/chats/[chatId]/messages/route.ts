@@ -136,12 +136,14 @@ export async function POST(
     });
 
     // Save assistant message
+        // Save assistant message
     const assistantMessage = await db.message.create({
       data: {
         chatId,
         role: 'assistant',
         content: aiResponse.content,
         citations: aiResponse.citations.length > 0 ? JSON.stringify(aiResponse.citations) : null,
+        images: aiResponse.images.length > 0 ? JSON.stringify(aiResponse.images) : null,
       },
     });
 

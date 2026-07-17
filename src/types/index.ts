@@ -91,6 +91,7 @@ export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   citations: string | null;
+  images: string | null;
   createdAt: string;
 }
 

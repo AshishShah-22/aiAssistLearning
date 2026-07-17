@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useAppStore, useNotebookStore } from '@/stores';
+import { useAppStore, useNotebookStore, useChatStore } from '@/stores';
 import { NotebookHeader } from './NotebookHeader';
 import { NotebookSidebar } from './NotebookSidebar';
 import { WorkspaceContent } from './WorkspaceContent';
@@ -14,6 +14,7 @@ export function NotebookWorkspace() {
   const setNotebook = useNotebookStore((s) => s.setNotebook);
   const setUnits = useNotebookStore((s) => s.setUnits);
   const reset = useNotebookStore((s) => s.reset);
+  const resetChat = useChatStore((s) => s.reset);
 
   // Track which notebook ID we've already synced — prevents re-sync loops
   const syncedNotebookId = useRef<string | null>(null);
@@ -57,12 +58,13 @@ export function NotebookWorkspace() {
 
   // Reset store when leaving notebook view
   useEffect(() => {
-    if (view !== 'notebook') {
-      reset();
-      syncedNotebookId.current = null;
-      lastOpenedUpdated.current = null;
-    }
-  }, [view, reset]);
+  if (view !== 'notebook') {
+    reset();
+    resetChat();
+    syncedNotebookId.current = null;
+    lastOpenedUpdated.current = null;
+  }
+}, [view, reset, resetChat]);
 
   // Don't render if not in notebook view
   if (view !== 'notebook') return null;
