@@ -187,4 +187,84 @@ Rules: "imageQuery" should be a short query for a relevant diagram ONLY if visua
 
   console.error('[TutoringEngine] All retries exhausted');
   throw lastError || new Error('Tutoring response generation failed after all retries');
+
 }
+  // ─── Streaming Version ─────────────────────────────────
+export async function generateTutorResponseStream(params: {
+  userMessage: string;
+  syllabusContext: string;
+  notebookContent: string;
+  chatHistory: { role: string; content: string }[];
+  onChunk: (text: string) => void;
+}): Promise<{ content: string; citations: string[]; images: { url: string; caption: string }[] }> {
+  const { userMessage, syllabusContext, notebookContent, chatHistory, onChunk } = params;
+
+  // Build context block (same as non-streaming version)
+  const contextParts: string[] = [];
+  if (syllabusContext.trim()) contextParts.push(`SYLLABUS CONTEXT:\n${syllabusContext}`);
+  if (notebookContent.trim()) contextParts.push(`UPLOADED MATERIALS / NOTES:\n${notebookContent}`);
+
+  const contextBlock = contextParts.length > 0
+    ? `\n\n---\nREFERENCE MATERIALS:\n${contextParts.join('\n\n---\n')}\n---\n`
+    : '';
+
+  const recentHistory = chatHistory.slice(-10).map((msg) => ({
+    role: msg.role,
+    content: msg.content,
+  }));
+
+  const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+    { role: 'system', content: TUTORING_SYSTEM_PROMPT },
+  ];
+
+  if (contextBlock) {
+    messages.push({ role: 'user', content: `[System context provided for reference]${contextBlock}` });
+    messages.push({ role: 'assistant', content: 'Understood. I will use these reference materials to answer the student\'s questions accurately with proper citations.' });
+  }
+
+  for (const msg of recentHistory) {
+    if (msg.role === 'user' || msg.role === 'assistant') {
+      messages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  messages.push({
+    role: 'user',
+    content: `${userMessage}
+
+---
+IMPORTANT: Format your response as JSON with this exact structure:
+{"content": "your markdown answer here", "citations": ["citation1"], "imageQuery": "diagram search query or null"}
+Rules: "imageQuery" should be a short query for a relevant diagram ONLY if visuals help, otherwise null. "citations" is an array of referenced topics/documents. Return valid JSON only, nothing else.`,
+  });
+
+  // Stream the response
+  const { aiChatStream } = await import('@/lib/ai-provider');
+  const fullText = await aiChatStream(messages, (chunk) => {
+    onChunk(chunk); // send each chunk to frontend
+  });
+
+  // Parse the complete response
+  const cleaned = fullText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    const content = typeof parsed.content === 'string' ? parsed.content : fullText;
+    const citations = Array.isArray(parsed.citations) ? parsed.citations : [];
+    let images: { url: string; caption: string }[] = [];
+
+    if (parsed.imageQuery && typeof parsed.imageQuery === 'string' && parsed.imageQuery.trim()) {
+      const cleanContent = content.replace(/\[IMAGE:[^\]]*\]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+      images = await searchImages(parsed.imageQuery.trim(), 3);
+      return { content: cleanContent, citations, images };
+    }
+
+    return { content, citations, images };
+  } catch {
+    // Fallback: return raw text
+    console.warn('[TutoringEngine] Streaming: JSON parse failed, returning raw text');
+    return { content: fullText, citations: [], images: [] };
+  }
+}
+
+

@@ -30,7 +30,7 @@ export async function POST(
   try {
     const { id, chatId } = await params;
     const body = await request.json();
-    const { content } = body;
+    const { content, stream } = body;
 
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
       return NextResponse.json(
@@ -57,7 +57,7 @@ export async function POST(
       },
     });
 
-    // Build context for AI
+    // Build context for AI (same as before)
     const notebook = await db.notebook.findUnique({
       where: { id },
       include: {
@@ -83,7 +83,6 @@ export async function POST(
       },
     });
 
-    // Build syllabus context
     const syllabusContext = notebook?.units
       ? notebook.units
           .map(
@@ -93,19 +92,17 @@ export async function POST(
           .join('\n\n')
       : '';
 
-    // Build notebook content from documents and notes
     const docContent = notebook?.documents
-      .filter((d) => d.content)
+      ?.filter((d) => d.content)
       .map((d) => `[${d.filename}]\n${d.content}`)
-      .join('\n\n');
+      .join('\n\n') || '';
 
     const notesContent = notebook?.notes
-      .map((n) => `## ${n.title}\n${n.content}`)
-      .join('\n\n');
+      ?.map((n) => `## ${n.title}\n${n.content}`)
+      .join('\n\n') || '';
 
     const notebookContent = [docContent, notesContent].filter(Boolean).join('\n\n');
 
-    // Build quiz performance context
     const quizPerformance = notebook?.quizzes
       ? notebook.quizzes
           .map(
@@ -117,17 +114,78 @@ export async function POST(
 
     const fullNotebookContent = [notebookContent, quizPerformance ? `\nQuiz Performance:\n${quizPerformance}` : ''].filter(Boolean).join('\n');
 
-    // Get chat history
     const chatHistory = await db.message.findMany({
       where: { chatId },
       orderBy: { createdAt: 'asc' },
       select: { role: true, content: true },
     });
 
-    // Dynamically import AI engine
+    // If client wants streaming, return SSE
+    if (stream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            // Send user message ID first
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'userMessageId', id: userMessage.id })}\n\n`));
+
+            // Dynamically import streaming engine
+            const { generateTutorResponseStream } = await import('@/lib/ai-engines/tutoring-engine');
+
+            const result = await generateTutorResponseStream({
+              userMessage: content.trim(),
+              syllabusContext,
+              notebookContent: fullNotebookContent,
+              chatHistory: chatHistory.map((m) => ({ role: m.role, content: m.content })),
+              onChunk: (chunk) => {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`));
+              },
+            });
+
+            // Save assistant message to DB
+            const assistantMessage = await db.message.create({
+              data: {
+                chatId,
+                role: 'assistant',
+                content: result.content,
+                citations: result.citations.length > 0 ? JSON.stringify(result.citations) : null,
+                images: result.images.length > 0 ? JSON.stringify(result.images) : null,
+              },
+            });
+
+            // Send final message with complete data
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, content: result.content, citations: result.citations, images: result.images })}\n\n`));
+
+            // Update chat title from first user message
+            const messageCount = await db.message.count({ where: { chatId } });
+            if (messageCount <= 2) {
+              const title = content.trim().slice(0, 60) + (content.length > 60 ? '...' : '');
+              await db.chat.update({
+                where: { id: chatId },
+                data: { title },
+              });
+            }
+          } catch (error) {
+            console.error('[Stream] Error:', error);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Failed to generate response' })}\n\n`));
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    // Non-streaming fallback (original behavior)
     const { generateTutorResponse } = await import('@/lib/ai-engines/tutoring-engine');
 
-    // Call AI tutoring engine
     const aiResponse = await generateTutorResponse({
       userMessage: content.trim(),
       syllabusContext,
@@ -135,19 +193,16 @@ export async function POST(
       chatHistory: chatHistory.map((m) => ({ role: m.role, content: m.content })),
     });
 
-    // Save assistant message
-        // Save assistant message
     const assistantMessage = await db.message.create({
       data: {
         chatId,
         role: 'assistant',
         content: aiResponse.content,
         citations: aiResponse.citations.length > 0 ? JSON.stringify(aiResponse.citations) : null,
-        images: aiResponse.images.length > 0 ? JSON.stringify(aiResponse.images) : null,
+        images: aiResponse.images && aiResponse.images.length > 0 ? JSON.stringify(aiResponse.images) : null,
       },
     });
 
-    // Update chat title from first user message
     const messageCount = await db.message.count({ where: { chatId } });
     if (messageCount <= 2) {
       const title = content.trim().slice(0, 60) + (content.length > 60 ? '...' : '');

@@ -212,3 +212,163 @@ aiChat._logged = false as boolean;
 export function getAIProviderInfo() {
   return getProviderInfo();
 }
+// ─── Streaming Support ───────────────────────────────
+export type StreamCallback = (chunk: string) => void;
+
+/**
+ * Stream AI responses token by token.
+ * Calls `onChunk(text)` for each piece of text.
+ * Returns the full accumulated text when done.
+ */
+export async function aiChatStream(
+  messages: ChatMessage[],
+  onChunk: StreamCallback
+): Promise<string> {
+  const { provider, model } = getProviderInfo();
+
+  if (!aiChatStream._logged) {
+    console.log(`[AI Provider] Streaming with: ${provider}${model !== 'default' ? ` (model: ${model})` : ''}`);
+    aiChatStream._logged = true;
+  }
+
+  switch (provider) {
+    case 'groq':
+      return streamWithGroq(messages, model, onChunk);
+    case 'openai':
+      return streamWithOpenAI(messages, model, onChunk);
+    case 'deepseek':
+      return streamWithDeepSeek(messages, model, onChunk);
+    case 'google':
+      // Google streaming is complex — fall back to non-streaming
+      console.warn('[AI Provider] Google Gemini streaming not supported, falling back to non-streaming');
+      {
+        const resp = await chatWithGoogle(messages, model);
+        onChunk(resp.content);
+        return resp.content;
+      }
+    case 'zai':
+      // ZAI SDK doesn't expose streaming easily — fall back to non-streaming
+      console.warn('[AI Provider] ZAI streaming not supported, falling back to non-streaming');
+      {
+        const resp = await chatWithZAI(messages);
+        onChunk(resp.content);
+        return resp.content;
+      }
+    default:
+      throw new Error(`Unknown AI provider: ${provider}`);
+  }
+}
+aiChatStream._logged = false as boolean;
+
+// ─── Streaming: Groq (OpenAI-compatible SSE) ────────
+async function streamWithGroq(
+  messages: ChatMessage[],
+  model: string,
+  onChunk: StreamCallback
+): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY!;
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.7, stream: true }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Groq API error (${res.status}): ${err}`);
+  }
+
+  return readSSEStream(res, onChunk);
+}
+
+// ─── Streaming: OpenAI (SSE) ────────────────────────
+async function streamWithOpenAI(
+  messages: ChatMessage[],
+  model: string,
+  onChunk: StreamCallback
+): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY!;
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.7, stream: true }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`OpenAI API error (${res.status}): ${err}`);
+  }
+
+  return readSSEStream(res, onChunk);
+}
+
+// ─── Streaming: DeepSeek (OpenAI-compatible SSE) ────
+async function streamWithDeepSeek(
+  messages: ChatMessage[],
+  model: string,
+  onChunk: StreamCallback
+): Promise<string> {
+  const apiKey = process.env.DEEPSEEK_API_KEY!;
+  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.7, stream: true }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`DeepSeek API error (${res.status}): ${err}`);
+  }
+
+  return readSSEStream(res, onChunk);
+}
+
+// ─── SSE Reader (shared by Groq/OpenAI/DeepSeek) ────
+async function readSSEStream(
+  res: Response,
+  onChunk: StreamCallback
+): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body for streaming');
+
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // keep incomplete line in buffer
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      if (!trimmed.startsWith('data: ')) continue;
+
+      try {
+        const json = JSON.parse(trimmed.slice(6));
+        const delta = json.choices?.[0]?.delta?.content;
+        if (delta) {
+          fullText += delta;
+          onChunk(delta);
+        }
+      } catch {
+        // skip malformed SSE lines
+      }
+    }
+  }
+
+  return fullText;
+}

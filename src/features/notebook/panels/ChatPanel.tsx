@@ -506,6 +506,7 @@ export default function ChatPanel() {
   });
 
   // Send message mutation
+    // Send message mutation
   const sendMessageMutation = useMutation({
     mutationFn: async ({
       content,
@@ -515,6 +516,7 @@ export default function ChatPanel() {
       chatId: string;
     }) => {
       setStreaming(true);
+
       // Optimistically add user message
       const userMsg: Message = {
         id: `temp-user-${Date.now()}`,
@@ -522,37 +524,103 @@ export default function ChatPanel() {
         role: 'user',
         content,
         citations: null,
+        images: null,
         createdAt: new Date().toISOString(),
       };
       setLocalMessages((prev) => [...prev, userMsg]);
 
+      // Add a placeholder assistant message for streaming
+      const assistantMsg: Message = {
+        id: `temp-assistant-${Date.now()}`,
+        chatId,
+        role: 'assistant',
+        content: '',
+        citations: null,
+        images: null,
+        createdAt: new Date().toISOString(),
+      };
+      setLocalMessages((prev) => [...prev, assistantMsg]);
+
+      // Use EventSource-like fetch for SSE streaming
       const res = await fetch(
         `/api/notebooks/${notebookId}/chats/${chatId}/messages`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content, stream: true }),
         }
       );
-      return res.json() as Promise<{ messages: Message[] }>;
+
+      if (!res.ok) {
+        throw new Error('Failed to send message');
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+          try {
+            const data = JSON.parse(trimmed.slice(6));
+
+            if (data.type === 'chunk') {
+              fullContent += data.text;
+              // Update the assistant message content progressively
+              setLocalMessages((prev) => {
+                const updated = [...prev];
+                const lastIdx = updated.length - 1;
+                if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
+                  updated[lastIdx] = { ...updated[lastIdx], content: fullContent };
+                }
+                return updated;
+              });
+            } else if (data.type === 'done') {
+              // Streaming complete — server saved the message
+              fullContent = data.content || fullContent;
+            } else if (data.type === 'error') {
+              throw new Error(data.error || 'Stream error');
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message !== 'Stream error') {
+              // skip parse errors
+            }
+          }
+        }
+      }
+
+      return { chatId, content: fullContent };
     },
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       setStreaming(false);
       setLocalMessages([]);
       queryClient.invalidateQueries({
-        queryKey: ['messages', variables.chatId],
+        queryKey: ['messages', data.chatId],
       });
       queryClient.invalidateQueries({
         queryKey: ['chats', notebookId],
       });
     },
-    onError: () => {
+    onError: (error) => {
       setStreaming(false);
       setLocalMessages([]);
-      toast.error('Failed to send message. Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Failed to send message');
     },
   });
-
+  
   // Auto-scroll to bottom
     const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
