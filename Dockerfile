@@ -56,6 +56,8 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # Startup script: create tables then start server
-COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
+# COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
