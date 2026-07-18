@@ -56,3 +56,5 @@ server.log
 env
 .env.local
 .env.production
+# Docker
+docker-compose.override.yml
