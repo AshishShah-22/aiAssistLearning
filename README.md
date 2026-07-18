@@ -107,3 +107,6 @@ Server-side AI processing only (no SDK exposure to client)
 This project is developed for academic purposes.
 
 ### This webiste link — http://16.170.35.248:3000 check karo.
+
+<img width="1085" height="784" alt="image" src="https://github.com/user-attachments/assets/1a23c2e6-4ef3-4941-be25-e1dd09606598" />
+
