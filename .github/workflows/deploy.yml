@@ -1,54 +1,24 @@
-name: Deploy to AWS App Runner
+name: Deploy to EC2
 
 on:
   push:
     branches: [main]
 
-env:
-  AWS_REGION: ap-south-1
-
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ailearning
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-      - name: Deploy to App Runner
-        run: |
-          aws apprunner update-service \
-            --service-arn ${{ secrets.APP_RUNNER_SERVICE_ARN }} \
-            --source-configuration "ImageRepository={ImageIdentifier=${{ steps.build-image.outputs.image }},ImageConfiguration={Port=3000,RuntimeEnvironmentVariables=[{Name=DATABASE_URL,Value='file:/app/data/study.db'},{Name=AI_PROVIDER,Value='groq'},{Name=GROQ_API_KEY,Value='${{ secrets.GROQ_API_KEY }}'},{Name=GROQ_MODEL,Value='llama-3.3-70b-versatile'}]}"
-
-      - name: Deployment complete
-        run: echo "Deployed successfully with image tag ${{ github.sha }}"
-
-
-
-
-
-        mkdir -p ~/ailearning && cd ~/ailearning
-git clone https://github.com/AshishShah-22/aiAssistLearning.git .
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/ailearning
+            git pull origin main
+            sudo docker-compose down
+            sudo docker-compose up --build -d
