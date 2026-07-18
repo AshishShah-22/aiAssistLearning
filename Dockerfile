@@ -44,12 +44,13 @@ RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
 # Copy prisma schema
 COPY --from=builder /app/prisma ./prisma
 
-# Copy node_modules for prisma
+# Copy node_modules for prisma CLI
 COPY --from=builder /app/node_modules ./node_modules
 
-
+# Copy and fix entrypoint script
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
+
 # Set proper permissions
 USER nextjs
 
@@ -57,13 +58,5 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-
-# Startup script: create tables then start server
-<<<<<<< HEAD
-=======
-# COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
->>>>>>> 3d4bb21985dec5fd909512ac10e0b324668158cc
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

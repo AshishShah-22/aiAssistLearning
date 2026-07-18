@@ -9,7 +9,6 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_MODEL=llama-3.3-70b-versatile
     volumes:
-      # Persist SQLite database across container restarts
       - study-data:/app/data
     restart: unless-stopped
 
