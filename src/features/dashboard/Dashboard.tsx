@@ -164,7 +164,8 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {statCards.map((stat) => {
             const Icon = stat.icon;
-            const value = stats ? stats[stat.key] : null;
+            const rawValue = stats ? stats[stat.key] : null;
+            const value = typeof rawValue === 'number' ? rawValue : 0;
             return (
               <Card key={stat.key}>
                 <CardContent className="p-4">
@@ -173,7 +174,7 @@ export default function Dashboard() {
                       <Icon className={`w-5 h-5 ${stat.color}`} />
                     </div>
                     <div className="min-w-0">
-                      {statsLoading || value === null ? (
+                      {statsLoading || rawValue === null ? (
                         <>
                           <Skeleton className="h-3 w-8 mb-1" />
                           <Skeleton className="h-5 w-14" />

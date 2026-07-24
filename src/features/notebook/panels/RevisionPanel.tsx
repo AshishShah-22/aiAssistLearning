@@ -36,7 +36,12 @@ export default function RevisionPanel() {
   const { units } = useNotebookStore();
   const queryClient = useQueryClient();
 
-  const { data: progress, isLoading: progressLoading } = useQuery<ProgressType[]>({
+  const { data: progressData, isLoading: progressLoading } = useQuery<{
+    progressRecords: ProgressType[];
+    topicProgress: { topicId: string; status: string; percentComplete: number; studyMinutes: number }[];
+    unitProgress: { unitId: string; percentComplete: number }[];
+    overall: { percentComplete: number; totalStudyMinutes: number; avgQuizScore: number; totalQuizzesTaken: number };
+  }>({
     queryKey: ['progress', notebookId],
     queryFn: async () => {
       const res = await fetch(`/api/notebooks/${notebookId}/progress`);
@@ -45,6 +50,7 @@ export default function RevisionPanel() {
     },
     enabled: !!notebookId,
   });
+  const progress = progressData?.progressRecords || [];
 
   const { data: sessions, isLoading: sessionsLoading } = useQuery<StudySession[]>({
     queryKey: ['sessions', notebookId],

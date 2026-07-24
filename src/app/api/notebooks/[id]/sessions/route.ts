@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-
-const DUMMY_USER_ID = 'user-1';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const body = await request.json();
     const { topicId, activityType, duration, metadata } = body;
@@ -29,7 +33,7 @@ export async function POST(
     const session = await db.studySession.create({
       data: {
         notebookId: id,
-        userId: DUMMY_USER_ID,
+        userId: user.id,
         topicId: topicId || null,
         activityType,
         duration: Math.round(duration),

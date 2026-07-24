@@ -212,10 +212,6 @@ function MessageBubble({ message }: { message: Message }) {
     ? JSON.parse(message.citations)
     : [];
 
-  const images: { url: string; caption: string }[] = message.images
-    ? JSON.parse(message.images)
-    : [];
-
   const timeStr = message.createdAt
     ? formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })
     : '';
@@ -269,28 +265,6 @@ function MessageBubble({ message }: { message: Message }) {
             </div>
           )}
         </div>
-
-        {/* Images */}
-        {!isUser && images.length > 0 && (
-          <div className="flex flex-col gap-2 mt-2">
-            {images.map((img, i) => (
-              <div key={i} className="rounded-lg overflow-hidden border bg-card">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.url}
-                  alt={img.caption || 'Diagram'}
-                  className="w-full max-h-64 object-contain bg-white"
-                  loading="lazy"
-                />
-                {img.caption && (
-                  <p className="text-[11px] text-muted-foreground px-2 py-1.5 border-t bg-muted/30">
-                    {img.caption}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* Citations */}
         {!isUser && citations.length > 0 && (
@@ -506,7 +480,6 @@ export default function ChatPanel() {
   });
 
   // Send message mutation
-    // Send message mutation
   const sendMessageMutation = useMutation({
     mutationFn: async ({
       content,
@@ -516,7 +489,6 @@ export default function ChatPanel() {
       chatId: string;
     }) => {
       setStreaming(true);
-
       // Optimistically add user message
       const userMsg: Message = {
         id: `temp-user-${Date.now()}`,
@@ -524,108 +496,47 @@ export default function ChatPanel() {
         role: 'user',
         content,
         citations: null,
-        images: null,
         createdAt: new Date().toISOString(),
       };
       setLocalMessages((prev) => [...prev, userMsg]);
 
-      // Add a placeholder assistant message for streaming
-      const assistantMsg: Message = {
-        id: `temp-assistant-${Date.now()}`,
-        chatId,
-        role: 'assistant',
-        content: '',
-        citations: null,
-        images: null,
-        createdAt: new Date().toISOString(),
-      };
-      setLocalMessages((prev) => [...prev, assistantMsg]);
-
-      // Use EventSource-like fetch for SSE streaming
       const res = await fetch(
         `/api/notebooks/${notebookId}/chats/${chatId}/messages`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, stream: true }),
+          body: JSON.stringify({ content }),
         }
       );
-
-      if (!res.ok) {
-        throw new Error('Failed to send message');
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const decoder = new TextDecoder();
-      let fullContent = '';
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) continue;
-
-          try {
-            const data = JSON.parse(trimmed.slice(6));
-
-            if (data.type === 'chunk') {
-              fullContent += data.text;
-              // Update the assistant message content progressively
-              setLocalMessages((prev) => {
-                const updated = [...prev];
-                const lastIdx = updated.length - 1;
-                if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
-                  updated[lastIdx] = { ...updated[lastIdx], content: fullContent };
-                }
-                return updated;
-              });
-            } else if (data.type === 'done') {
-              // Streaming complete — server saved the message
-              fullContent = data.content || fullContent;
-            } else if (data.type === 'error') {
-              throw new Error(data.error || 'Stream error');
-            }
-          } catch (e) {
-            if (e instanceof Error && e.message !== 'Stream error') {
-              // skip parse errors
-            }
-          }
-        }
-      }
-
-      return { chatId, content: fullContent };
+      return res.json() as Promise<{ messages: Message[] }>;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       setStreaming(false);
       setLocalMessages([]);
       queryClient.invalidateQueries({
-        queryKey: ['messages', data.chatId],
+        queryKey: ['messages', variables.chatId],
       });
       queryClient.invalidateQueries({
         queryKey: ['chats', notebookId],
       });
     },
-    onError: (error) => {
+    onError: () => {
       setStreaming(false);
       setLocalMessages([]);
-      toast.error(error instanceof Error ? error.message : 'Failed to send message');
+      toast.error('Failed to send message. Please try again.');
     },
   });
-  
+
   // Auto-scroll to bottom
-    const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
       if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        const viewport = scrollRef.current.querySelector(
+          '[data-slot="scroll-area-viewport"]'
+        );
+        if (viewport) {
+          viewport.scrollTop = viewport.scrollHeight;
+        }
       }
     });
   }, []);
@@ -761,8 +672,8 @@ export default function ChatPanel() {
         {!activeChatId ? (
           <WelcomeScreen onSend={(text) => handleSend(text)} />
         ) : (
-          <div className="flex-1 overflow-y-auto" ref={scrollRef as React.RefObject<HTMLDivElement>}>
-            <div className="p-4 space-y-4 max-w-3xl mx-auto">
+          <ScrollArea className="flex-1" ref={scrollRef}>
+            <div className="p-4 space-y-4">
               {messagesLoading && displayMessages.length === 0 ? (
                 <div className="space-y-4">
                   {[1, 2].map((i) => (
@@ -803,7 +714,7 @@ export default function ChatPanel() {
                 </motion.div>
               )}
             </div>
-          </div>
+          </ScrollArea>
         )}
 
         {/* Input area */}

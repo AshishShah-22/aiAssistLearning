@@ -74,3 +74,32 @@ export async function POST(
     );
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: notebookId } = await params;
+    const { searchParams } = new URL(request.url);
+    const resourceId = searchParams.get('resourceId');
+
+    if (!resourceId) {
+      return NextResponse.json({ error: 'resourceId is required' }, { status: 400 });
+    }
+
+    const existing = await db.resource.findFirst({
+      where: { id: resourceId, notebookId },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+    }
+
+    await db.resource.delete({ where: { id: resourceId } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting resource:', error);
+    return NextResponse.json({ error: 'Failed to delete resource' }, { status: 500 });
+  }
+}

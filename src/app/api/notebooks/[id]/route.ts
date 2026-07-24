@@ -56,11 +56,28 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, description, color, status, currentUnitId, currentTopicId } = body;
+    const { name, description, color, status, currentUnitId, currentTopicId, topicId, topicStatus } = body;
 
     const existing = await db.notebook.findUnique({ where: { id } });
     if (!existing) {
       return NextResponse.json({ error: 'Notebook not found' }, { status: 404 });
+    }
+
+    // Handle topic status update
+    if (topicId && topicStatus) {
+      const topic = await db.topic.findFirst({ where: { id: topicId, unit: { notebookId: id } } });
+      if (!topic) {
+        return NextResponse.json({ error: 'Topic not found' }, { status: 404 });
+      }
+      await db.topic.update({ where: { id: topicId }, data: { status: topicStatus } });
+      // Return updated notebook with units
+      const updated = await db.notebook.findUnique({
+        where: { id },
+        include: {
+          units: { orderBy: { order: 'asc' }, include: { topics: { orderBy: { order: 'asc' } } } },
+        },
+      });
+      return NextResponse.json(updated);
     }
 
     const updateData: Record<string, unknown> = {};

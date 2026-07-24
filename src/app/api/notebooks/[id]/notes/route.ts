@@ -73,3 +73,91 @@ export async function POST(
     );
   }
 }
+
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: notebookId } = await params;
+    const body = await request.json();
+    const { noteId, title, content, type } = body;
+
+    if (!noteId) {
+      return NextResponse.json(
+        { error: 'noteId is required' },
+        { status: 400 }
+      );
+    }
+
+    const existing = await db.note.findFirst({
+      where: { id: noteId, notebookId },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: 'Note not found' },
+        { status: 404 }
+      );
+    }
+
+    const note = await db.note.update({
+      where: { id: noteId },
+      data: {
+        ...(title !== undefined && { title: title.trim() }),
+        ...(content !== undefined && { content: content.trim() }),
+        ...(type !== undefined && { type }),
+        updatedAt: new Date(),
+      },
+    });
+
+    return NextResponse.json(note);
+  } catch (error) {
+    console.error('Error updating note:', error);
+    return NextResponse.json(
+      { error: 'Failed to update note' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: notebookId } = await params;
+    const { searchParams } = new URL(request.url);
+    const noteId = searchParams.get('noteId');
+
+    if (!noteId) {
+      return NextResponse.json(
+        { error: 'noteId is required' },
+        { status: 400 }
+      );
+    }
+
+    const existing = await db.note.findFirst({
+      where: { id: noteId, notebookId },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: 'Note not found' },
+        { status: 404 }
+      );
+    }
+
+    await db.note.delete({
+      where: { id: noteId },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting note:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete note' },
+      { status: 500 }
+    );
+  }
+}

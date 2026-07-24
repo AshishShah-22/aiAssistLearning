@@ -85,8 +85,6 @@ async function chatWithOpenAI(messages: ChatMessage[], model: string): Promise<A
 async function chatWithGoogle(messages: ChatMessage[], model: string): Promise<AIResponse> {
   const apiKey = process.env.GOOGLE_API_KEY!;
 
-  // Gemini API expects a different format: contents[] with role "user"/"model"
-  // System instructions go in a separate top-level field
   let systemInstruction: string | undefined;
   const contents: { role: string; parts: { text: string }[] }[] = [];
 
@@ -127,7 +125,6 @@ async function chatWithGoogle(messages: ChatMessage[], model: string): Promise<A
 }
 
 // ─── Groq ────────────────────────────────────────────
-// Groq uses OpenAI-compatible API format — very cheap & fast
 async function chatWithGroq(messages: ChatMessage[], model: string): Promise<AIResponse> {
   const apiKey = process.env.GROQ_API_KEY!;
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -149,7 +146,6 @@ async function chatWithGroq(messages: ChatMessage[], model: string): Promise<AIR
 }
 
 // ─── DeepSeek ────────────────────────────────────────
-// DeepSeek also uses OpenAI-compatible API format — very cheap, great for study
 async function chatWithDeepSeek(messages: ChatMessage[], model: string): Promise<AIResponse> {
   const apiKey = process.env.DEEPSEEK_API_KEY!;
   const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
@@ -170,60 +166,85 @@ async function chatWithDeepSeek(messages: ChatMessage[], model: string): Promise
   return { content };
 }
 
-// ─── Unified Entry Point ─────────────────────────────
-/**
- * Call this function from ANY AI engine.
- *
- * Usage:
- *   import { aiChat } from '@/lib/ai-provider';
- *   const response = await aiChat([
- *     { role: 'system', content: 'You are a tutor...' },
- *     { role: 'user', content: 'Explain photosynthesis' },
- *   ]);
- *   console.log(response.content);
- */
+// ─── Streaming: OpenAI-compatible (Groq, OpenAI, DeepSeek) ─
+async function* streamOpenAICompatible(
+  url: string,
+  apiKey: string,
+  model: string,
+  messages: ChatMessage[],
+): AsyncGenerator<string, void, undefined> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.7, stream: true }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Streaming API error (${res.status}): ${err}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body for streaming');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      const data = trimmed.slice(6);
+      if (data === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(data);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) yield content;
+      } catch {
+        // skip malformed chunks
+      }
+    }
+  }
+}
+
+// ─── Unified Entry Point (non-streaming) ─────────────
 export async function aiChat(messages: ChatMessage[]): Promise<AIResponse> {
   const { provider, model } = getProviderInfo();
 
-  // Log which provider is being used (only first time per process)
   if (!aiChat._logged) {
     console.log(`[AI Provider] Using: ${provider}${model !== 'default' ? ` (model: ${model})` : ''}`);
     aiChat._logged = true;
   }
 
   switch (provider) {
-    case 'openai':
-      return chatWithOpenAI(messages, model);
-    case 'google':
-      return chatWithGoogle(messages, model);
-    case 'groq':
-      return chatWithGroq(messages, model);
-    case 'deepseek':
-      return chatWithDeepSeek(messages, model);
-    case 'zai':
-      return chatWithZAI(messages);
-    default:
-      throw new Error(`Unknown AI provider: ${provider}`);
+    case 'openai': return chatWithOpenAI(messages, model);
+    case 'google': return chatWithGoogle(messages, model);
+    case 'groq': return chatWithGroq(messages, model);
+    case 'deepseek': return chatWithDeepSeek(messages, model);
+    case 'zai': return chatWithZAI(messages);
+    default: throw new Error(`Unknown AI provider: ${provider}`);
   }
 }
 aiChat._logged = false as boolean;
 
-// ─── Helper: Get current provider info (for UI display) ──
-export function getAIProviderInfo() {
-  return getProviderInfo();
-}
-// ─── Streaming Support ───────────────────────────────
-export type StreamCallback = (chunk: string) => void;
-
+// ─── Unified Entry Point (streaming) ─────────────────
 /**
- * Stream AI responses token by token.
- * Calls `onChunk(text)` for each piece of text.
- * Returns the full accumulated text when done.
+ * Returns an async generator that yields content chunks.
+ * Falls back to non-streaming for ZAI and Google providers.
  */
-export async function aiChatStream(
+export async function* aiChatStream(
   messages: ChatMessage[],
-  onChunk: StreamCallback
-): Promise<string> {
+): AsyncGenerator<string, void, undefined> {
   const { provider, model } = getProviderInfo();
 
   if (!aiChatStream._logged) {
@@ -233,142 +254,46 @@ export async function aiChatStream(
 
   switch (provider) {
     case 'groq':
-      return streamWithGroq(messages, model, onChunk);
+      yield* streamOpenAICompatible(
+        'https://api.groq.com/openai/v1/chat/completions',
+        process.env.GROQ_API_KEY!,
+        model,
+        messages,
+      );
+      return;
     case 'openai':
-      return streamWithOpenAI(messages, model, onChunk);
+      yield* streamOpenAICompatible(
+        'https://api.openai.com/v1/chat/completions',
+        process.env.OPENAI_API_KEY!,
+        model,
+        messages,
+      );
+      return;
     case 'deepseek':
-      return streamWithDeepSeek(messages, model, onChunk);
+      yield* streamOpenAICompatible(
+        'https://api.deepseek.com/v1/chat/completions',
+        process.env.DEEPSEEK_API_KEY!,
+        model,
+        messages,
+      );
+      return;
     case 'google':
-      // Google streaming is complex — fall back to non-streaming
-      console.warn('[AI Provider] Google Gemini streaming not supported, falling back to non-streaming');
-      {
-        const resp = await chatWithGoogle(messages, model);
-        onChunk(resp.content);
-        return resp.content;
-      }
     case 'zai':
-      // ZAI SDK doesn't expose streaming easily — fall back to non-streaming
-      console.warn('[AI Provider] ZAI streaming not supported, falling back to non-streaming');
-      {
-        const resp = await chatWithZAI(messages);
-        onChunk(resp.content);
-        return resp.content;
+      // Fallback: return full response as one chunk
+      try {
+        const response = await aiChat(messages);
+        if (response.content) yield response.content;
+      } catch (err) {
+        throw err;
       }
+      return;
     default:
       throw new Error(`Unknown AI provider: ${provider}`);
   }
 }
 aiChatStream._logged = false as boolean;
 
-// ─── Streaming: Groq (OpenAI-compatible SSE) ────────
-async function streamWithGroq(
-  messages: ChatMessage[],
-  model: string,
-  onChunk: StreamCallback
-): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY!;
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, messages, temperature: 0.7, stream: true }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Groq API error (${res.status}): ${err}`);
-  }
-
-  return readSSEStream(res, onChunk);
-}
-
-// ─── Streaming: OpenAI (SSE) ────────────────────────
-async function streamWithOpenAI(
-  messages: ChatMessage[],
-  model: string,
-  onChunk: StreamCallback
-): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY!;
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, messages, temperature: 0.7, stream: true }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenAI API error (${res.status}): ${err}`);
-  }
-
-  return readSSEStream(res, onChunk);
-}
-
-// ─── Streaming: DeepSeek (OpenAI-compatible SSE) ────
-async function streamWithDeepSeek(
-  messages: ChatMessage[],
-  model: string,
-  onChunk: StreamCallback
-): Promise<string> {
-  const apiKey = process.env.DEEPSEEK_API_KEY!;
-  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ model, messages, temperature: 0.7, stream: true }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`DeepSeek API error (${res.status}): ${err}`);
-  }
-
-  return readSSEStream(res, onChunk);
-}
-
-// ─── SSE Reader (shared by Groq/OpenAI/DeepSeek) ────
-async function readSSEStream(
-  res: Response,
-  onChunk: StreamCallback
-): Promise<string> {
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error('No response body for streaming');
-
-  const decoder = new TextDecoder();
-  let fullText = '';
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || ''; // keep incomplete line in buffer
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed === 'data: [DONE]') continue;
-      if (!trimmed.startsWith('data: ')) continue;
-
-      try {
-        const json = JSON.parse(trimmed.slice(6));
-        const delta = json.choices?.[0]?.delta?.content;
-        if (delta) {
-          fullText += delta;
-          onChunk(delta);
-        }
-      } catch {
-        // skip malformed SSE lines
-      }
-    }
-  }
-
-  return fullText;
+// ─── Helper: Get current provider info (for UI display) ──
+export function getAIProviderInfo() {
+  return getProviderInfo();
 }

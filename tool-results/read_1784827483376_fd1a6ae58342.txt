@@ -1,0 +1,825 @@
+     1→'use client';
+     2→
+     3→import { useState, useRef, useEffect, useCallback } from 'react';
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+     5→import { useAppStore, useNotebookStore } from '@/stores';
+     6→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+     7→import { Button } from '@/components/ui/button';
+     8→import { Badge } from '@/components/ui/badge';
+     9→import { Skeleton } from '@/components/ui/skeleton';
+    10→import { Textarea } from '@/components/ui/textarea';
+    11→import { Input } from '@/components/ui/input';
+    12→import { Label } from '@/components/ui/label';
+    13→import {
+    14→  Dialog,
+    15→  DialogContent,
+    16→  DialogHeader,
+    17→  DialogTitle,
+    18→  DialogFooter,
+    19→  DialogDescription,
+    20→} from '@/components/ui/dialog';
+    21→import {
+    22→  AlertDialog,
+    23→  AlertDialogAction,
+    24→  AlertDialogCancel,
+    25→  AlertDialogContent,
+    26→  AlertDialogDescription,
+    27→  AlertDialogFooter,
+    28→  AlertDialogHeader,
+    29→  AlertDialogTitle,
+    30→} from '@/components/ui/alert-dialog';
+    31→import {
+    32→  Select,
+    33→  SelectContent,
+    34→  SelectItem,
+    35→  SelectTrigger,
+    36→  SelectValue,
+    37→} from '@/components/ui/select';
+    38→import ReactMarkdown from 'react-markdown';
+    39→import {
+    40→  Plus,
+    41→  Sparkles,
+    42→  FileText,
+    43→  Pencil,
+    44→  ChevronLeft,
+    45→  Loader2,
+    46→  Trash2,
+    47→  Search,
+    48→  Filter,
+    49→  Copy,
+    50→  Check,
+    51→  BookOpen,
+    52→  X,
+    53→} from 'lucide-react';
+    54→import { toast } from 'sonner';
+    55→import type { Note, NoteType, Topic, Unit } from '@/types';
+    56→
+    57→// ─── Constants ───────────────────────────────────────
+    58→const noteTypeConfig: Record<NoteType, { label: string; color: string; desc: string }> = {
+    59→  general: { label: 'General', color: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300', desc: 'General notes' },
+    60→  summary: { label: 'Summary', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', desc: 'Concise overview' },
+    61→  exam: { label: 'Exam', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', desc: 'Exam-optimized' },
+    62→  revision: { label: 'Revision', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400', desc: 'Quick revision' },
+    63→  formula: { label: 'Formula', color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400', desc: 'Formula sheet' },
+    64→};
+    65→
+    66→const genTypeOptions: { value: NoteType; label: string; desc: string }[] = [
+    67→  { value: 'summary', label: 'Summary', desc: 'Concise overview of key points' },
+    68→  { value: 'detailed', label: 'Detailed Notes', desc: 'Comprehensive in-depth coverage' },
+    69→  { value: 'exam', label: 'Exam Notes', desc: 'Optimized for exam prep with expected questions' },
+    70→  { value: 'revision', label: 'Revision Notes', desc: 'Quick-scan bullet points & tables' },
+    71→  { value: 'formula', label: 'Formula Sheet', desc: 'Formulas, variables & worked examples' },
+    72→];
+    73→
+    74→// ─── Component ───────────────────────────────────────
+    75→export default function NotesPanel() {
+    76→  const notebookId = useAppStore((s) => s.currentNotebookId);
+    77→  const { units } = useNotebookStore();
+    78→  const queryClient = useQueryClient();
+    79→
+    80→  // ── State ──────────────────────────────────────────
+    81→  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+    82→  const [isEditing, setIsEditing] = useState(false);
+    83→  const [editContent, setEditContent] = useState('');
+    84→  const [editTitle, setEditTitle] = useState('');
+    85→
+    86→  // New note dialog
+    87→  const [showNewNote, setShowNewNote] = useState(false);
+    88→  const [newTitle, setNewTitle] = useState('');
+    89→  const [newContent, setNewContent] = useState('');
+    90→
+    91→  // Generate dialog
+    92→  const [showGenDialog, setShowGenDialog] = useState(false);
+    93→  const [genTopicId, setGenTopicId] = useState<string>('');
+    94→  const [genType, setGenType] = useState<NoteType>('exam');
+    95→
+    96→  // Streaming state
+    97→  const [isGenerating, setIsGenerating] = useState(false);
+    98→  const [streamTitle, setStreamTitle] = useState('');
+    99→  const [streamContent, setStreamContent] = useState('');
+   100→  const streamAbortRef = useRef<AbortController | null>(null);
+   101→
+   102→  // Delete confirmation
+   103→  const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
+   104→
+   105→  // Filter & search
+   106→  const [searchQuery, setSearchQuery] = useState('');
+   107→  const [filterType, setFilterType] = useState<string>('all');
+   108→  const [showFilters, setShowFilters] = useState(false);
+   109→
+   110→  // Copy feedback
+   111→  const [copiedId, setCopiedId] = useState<string | null>(null);
+   112→
+   113→  // Ref for streaming content scroll
+   114→  const streamEndRef = useRef<HTMLDivElement>(null);
+   115→
+   116→  // ── Derived data ───────────────────────────────────
+   117→  const allTopics: Topic[] = units.flatMap((u) => u.topics || []);
+   118→  const topicMap = new Map<string, Topic>();
+   119→  allTopics.forEach((t) => topicMap.set(t.id, t));
+   120→
+   121→  const unitMap = new Map<string, Unit>();
+   122→  units.forEach((u) => unitMap.set(u.id, u));
+   123→
+   124→  // ── Queries ────────────────────────────────────────
+   125→  const { data: notes, isLoading } = useQuery<Note[]>({
+   126→    queryKey: ['notes', notebookId],
+   127→    queryFn: async () => {
+   128→      const res = await fetch(`/api/notebooks/${notebookId}/notes`);
+   129→      if (!res.ok) throw new Error('Failed to fetch notes');
+   130→      return res.json();
+   131→    },
+   132→    enabled: !!notebookId,
+   133→  });
+   134→
+   135→  // ── Filtered notes ────────────────────────────────
+   136→  const filteredNotes = (notes || []).filter((note) => {
+   137→    if (filterType !== 'all' && note.type !== filterType) return false;
+   138→    if (searchQuery.trim()) {
+   139→      const q = searchQuery.toLowerCase();
+   140→      return (
+   141→        note.title.toLowerCase().includes(q) ||
+   142→        note.content.toLowerCase().includes(q)
+   143→      );
+   144→    }
+   145→    return true;
+   146→  });
+   147→
+   148→  const selectedNote = notes?.find((n) => n.id === selectedNoteId) || null;
+   149→
+   150→  // Auto-scroll streaming content
+   151→  useEffect(() => {
+   152→    if (isGenerating && streamEndRef.current) {
+   153→      streamEndRef.current.scrollIntoView({ behavior: 'smooth' });
+   154→    }
+   155→  }, [streamContent, isGenerating]);
+   156→
+   157→  // ── Mutations ──────────────────────────────────────
+   158→  const createMutation = useMutation({
+   159→    mutationFn: async (data: { title: string; content: string; topicId?: string; type: NoteType }) => {
+   160→      const res = await fetch(`/api/notebooks/${notebookId}/notes`, {
+   161→        method: 'POST',
+   162→        headers: { 'Content-Type': 'application/json' },
+   163→        body: JSON.stringify({ ...data, isAiGenerated: false }),
+   164→      });
+   165→      if (!res.ok) throw new Error('Failed to create note');
+   166→      return res.json();
+   167→    },
+   168→    onSuccess: (note) => {
+   169→      queryClient.invalidateQueries({ queryKey: ['notes', notebookId] });
+   170→      setSelectedNoteId(note.id);
+   171→      setEditTitle(note.title);
+   172→      setEditContent(note.content);
+   173→      setIsEditing(false);
+   174→      setShowNewNote(false);
+   175→      setNewTitle('');
+   176→      setNewContent('');
+   177→      toast.success('Note created');
+   178→    },
+   179→    onError: () => toast.error('Failed to create note'),
+   180→  });
+   181→
+   182→  const updateMutation = useMutation({
+   183→    mutationFn: async (data: { noteId: string; title: string; content: string; type?: string }) => {
+   184→      const res = await fetch(`/api/notebooks/${notebookId}/notes`, {
+   185→        method: 'PUT',
+   186→        headers: { 'Content-Type': 'application/json' },
+   187→        body: JSON.stringify(data),
+   188→      });
+   189→      if (!res.ok) throw new Error('Failed to update note');
+   190→      return res.json();
+   191→    },
+   192→    onSuccess: () => {
+   193→      queryClient.invalidateQueries({ queryKey: ['notes', notebookId] });
+   194→      setIsEditing(false);
+   195→      toast.success('Note saved');
+   196→    },
+   197→    onError: () => toast.error('Failed to save note'),
+   198→  });
+   199→
+   200→  const deleteMutation = useMutation({
+   201→    mutationFn: async (noteId: string) => {
+   202→      const res = await fetch(`/api/notebooks/${notebookId}/notes?noteId=${noteId}`, {
+   203→        method: 'DELETE',
+   204→      });
+   205→      if (!res.ok) throw new Error('Failed to delete note');
+   206→      return res.json();
+   207→    },
+   208→    onSuccess: (_, noteId) => {
+   209→      queryClient.invalidateQueries({ queryKey: ['notes', notebookId] });
+   210→      if (selectedNoteId === noteId) {
+   211→        setSelectedNoteId(null);
+   212→        setIsEditing(false);
+   213→      }
+   214→      setDeleteTarget(null);
+   215→      toast.success('Note deleted');
+   216→    },
+   217→    onError: () => toast.error('Failed to delete note'),
+   218→  });
+   219→
+   220→  // ── Streaming generate ─────────────────────────────
+   221→  const handleStreamGenerate = useCallback(async () => {
+   222→    if (!genTopicId) {
+   223→      toast.error('Please select a topic');
+   224→      return;
+   225→    }
+   226→
+   227→    setIsGenerating(true);
+   228→    setStreamTitle('');
+   229→    setStreamContent('');
+   230→    setShowGenDialog(false);
+   231→    setSelectedNoteId(null);
+   232→
+   233→    const abortController = new AbortController();
+   234→    streamAbortRef.current = abortController;
+   235→
+   236→    try {
+   237→      const res = await fetch(`/api/notebooks/${notebookId}/notes/generate`, {
+   238→        method: 'POST',
+   239→        headers: { 'Content-Type': 'application/json' },
+   240→        body: JSON.stringify({ topicId: genTopicId, type: genType, stream: true }),
+   241→        signal: abortController.signal,
+   242→      });
+   243→
+   244→      if (!res.ok) throw new Error('Generation failed');
+   245→
+   246→      const reader = res.body?.getReader();
+   247→      if (!reader) throw new Error('No response stream');
+   248→
+   249→      const decoder = new TextDecoder();
+   250→      let buffer = '';
+   251→
+   252→      while (true) {
+   253→        const { done, value } = await reader.read();
+   254→        if (done) break;
+   255→
+   256→        buffer += decoder.decode(value, { stream: true });
+   257→        const lines = buffer.split('\n');
+   258→        buffer = lines.pop() || '';
+   259→
+   260→        for (const line of lines) {
+   261→          const trimmed = line.trim();
+   262→          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+   263→
+   264→          try {
+   265→            const event = JSON.parse(trimmed.slice(6));
+   266→
+   267→            if (event.type === 'title') {
+   268→              setStreamTitle(event.title || 'Generating...');
+   269→            } else if (event.type === 'chunk') {
+   270→              setStreamContent((prev) => prev + (event.content || ''));
+   271→            } else if (event.type === 'done') {
+   272→              queryClient.invalidateQueries({ queryKey: ['notes', notebookId] });
+   273→              if (event.noteId) {
+   274→                setSelectedNoteId(event.noteId);
+   275→                setEditTitle(event.title || streamTitle);
+   276→              }
+   277→              toast.success('Notes generated successfully!');
+   278→            } else if (event.type === 'error') {
+   279→              toast.error(event.error || 'Generation failed');
+   280→            }
+   281→          } catch {
+   282→            // skip malformed SSE lines
+   283→          }
+   284→        }
+   285→      }
+   286→    } catch (err) {
+   287→      if (err instanceof Error && err.name === 'AbortError') {
+   288→        toast.info('Generation cancelled');
+   289→      } else {
+   290→        toast.error('Failed to generate notes');
+   291→      }
+   292→    } finally {
+   293→      setIsGenerating(false);
+   294→      streamAbortRef.current = null;
+   295→    }
+   296→  }, [genTopicId, genType, notebookId, queryClient, streamTitle]);
+   297→
+   298→  const handleCancelGeneration = () => {
+   299→    streamAbortRef.current?.abort();
+   300→  };
+   301→
+   302→  // ── Handlers ───────────────────────────────────────
+   303→  const handleStartEdit = () => {
+   304→    if (selectedNote) {
+   305→      setEditTitle(selectedNote.title);
+   306→      setEditContent(selectedNote.content);
+   307→      setIsEditing(true);
+   308→    }
+   309→  };
+   310→
+   311→  const handleSaveEdit = () => {
+   312→    if (selectedNote) {
+   313→      updateMutation.mutate({
+   314→        noteId: selectedNote.id,
+   315→        title: editTitle,
+   316→        content: editContent,
+   317→      });
+   318→    }
+   319→  };
+   320→
+   321→  const handleCreateNote = () => {
+   322→    if (!newTitle.trim()) {
+   323→      toast.error('Please enter a title');
+   324→      return;
+   325→    }
+   326→    createMutation.mutate({
+   327→      title: newTitle,
+   328→      content: newContent || `# ${newTitle}\n\nStart writing...`,
+   329→      type: 'general',
+   330→    });
+   331→  };
+   332→
+   333→  const handleSelectNote = (note: Note) => {
+   334→    setSelectedNoteId(note.id);
+   335→    setEditTitle(note.title);
+   336→    setEditContent(note.content);
+   337→    setIsEditing(false);
+   338→  };
+   339→
+   340→  const handleCopyNote = async (note: Note) => {
+   341→    try {
+   342→      await navigator.clipboard.writeText(note.content);
+   343→      setCopiedId(note.id);
+   344→      toast.success('Copied to clipboard');
+   345→      setTimeout(() => setCopiedId(null), 2000);
+   346→    } catch {
+   347→      toast.error('Failed to copy');
+   348→    }
+   349→  };
+   350→
+   351→  const getTopicName = (topicId: string | null): string | null => {
+   352→    if (!topicId) return null;
+   353→    const topic = topicMap.get(topicId);
+   354→    if (!topic) return null;
+   355→    // Find which unit this topic belongs to
+   356→    const unit = units.find((u) => u.id === topic.unitId);
+   357→    return unit ? `${unit.title} › ${topic.title}` : topic.title;
+   358→  };
+   359→
+   360→  // ── Render ─────────────────────────────────────────
+   361→  return (
+   362→    <div className="h-full flex flex-col">
+   363→      {/* ── Streaming Progress View ────────────────── */}
+   364→      {isGenerating ? (
+   365→        <div className="flex-1 flex flex-col min-h-0">
+   366→          {/* Header */}
+   367→          <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
+   368→            <div className="flex items-center gap-2 min-w-0">
+   369→              <div className="size-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+   370→                <Sparkles className="size-3 text-primary animate-pulse" />
+   371→              </div>
+   372→              <span className="text-sm font-medium truncate">
+   373→                {streamTitle || 'Generating notes...'}
+   374→              </span>
+   375→              <Badge variant="outline" className="text-xs shrink-0">
+   376→                <Loader2 className="size-3 animate-spin mr-1" />
+   377→                Generating
+   378→              </Badge>
+   379→            </div>
+   380→            <Button
+   381→              variant="ghost"
+   382→              size="sm"
+   383→              onClick={handleCancelGeneration}
+   384→              className="text-muted-foreground shrink-0"
+   385→            >
+   386→              <X className="size-4" />
+   387→            </Button>
+   388→          </div>
+   389→
+   390→          {/* Streaming content */}
+   391→          <div className="flex-1 overflow-y-auto p-4">
+   392→            {streamContent ? (
+   393→              <div className="prose prose-sm max-w-none dark:prose-invert">
+   394→                <ReactMarkdown>{streamContent}</ReactMarkdown>
+   395→              </div>
+   396→            ) : (
+   397→              <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+   398→                <div className="flex gap-1">
+   399→                  {[0, 1, 2].map((i) => (
+   400→                    <div
+   401→                      key={i}
+   402→                      className="size-2 rounded-full bg-primary animate-bounce"
+   403→                      style={{ animationDelay: `${i * 150}ms` }}
+   404→                    />
+   405→                  ))}
+   406→                </div>
+   407→                <span className="text-sm">AI is crafting your notes...</span>
+   408→              </div>
+   409→            )}
+   410→            <div ref={streamEndRef} />
+   411→          </div>
+   412→        </div>
+   413→      ) : (
+   414→        <>
+   415→          {/* ── Note Detail View ────────────────────── */}
+   416→          {selectedNote ? (
+   417→            <div className="flex-1 flex flex-col min-h-0">
+   418→              {/* Note header */}
+   419→              <div className="flex items-center gap-2 px-4 py-3 border-b flex-shrink-0">
+   420→                <Button
+   421→                  variant="ghost"
+   422→                  size="icon"
+   423→                  className="h-7 w-7 shrink-0"
+   424→                  onClick={() => { setSelectedNoteId(null); setIsEditing(false); }}
+   425→                >
+   426→                  <ChevronLeft className="size-4" />
+   427→                </Button>
+   428→                {isEditing ? (
+   429→                  <Input
+   430→                    value={editTitle}
+   431→                    onChange={(e) => setEditTitle(e.target.value)}
+   432→                    className="text-sm font-semibold h-8 flex-1 min-w-0"
+   433→                  />
+   434→                ) : (
+   435→                  <span className="text-sm font-medium flex-1 truncate">{selectedNote.title}</span>
+   436→                )}
+   437→                <Badge className={`${noteTypeConfig[selectedNote.type]?.color || noteTypeConfig.general.color} border-0 text-xs shrink-0`}>
+   438→                  {noteTypeConfig[selectedNote.type]?.label || selectedNote.type}
+   439→                </Badge>
+   440→                {selectedNote.isAiGenerated && (
+   441→                  <Badge variant="outline" className="text-xs gap-1 shrink-0">
+   442→                    <Sparkles className="size-3" /> AI
+   443→                  </Badge>
+   444→                )}
+   445→              </div>
+   446→
+   447→              {/* Note toolbar */}
+   448→              <div className="flex items-center gap-1 px-4 py-1.5 border-b bg-muted/30 flex-shrink-0">
+   449→                {isEditing ? (
+   450→                  <>
+   451→                    <Button size="sm" onClick={handleSaveEdit} disabled={updateMutation.isPending} className="h-7 text-xs">
+   452→                      {updateMutation.isPending ? <Loader2 className="size-3 animate-spin mr-1" /> : <Check className="size-3 mr-1" />}
+   453→                      Save
+   454→                    </Button>
+   455→                    <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)} className="h-7 text-xs">
+   456→                      Cancel
+   457→                    </Button>
+   458→                  </>
+   459→                ) : (
+   460→                  <>
+   461→                    <Button size="sm" variant="ghost" onClick={handleStartEdit} className="h-7 text-xs gap-1">
+   462→                      <Pencil className="size-3" /> Edit
+   463→                    </Button>
+   464→                    <Button
+   465→                      size="sm"
+   466→                      variant="ghost"
+   467→                      onClick={() => handleCopyNote(selectedNote)}
+   468→                      className="h-7 text-xs gap-1"
+   469→                    >
+   470→                      {copiedId === selectedNote.id ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
+   471→                      {copiedId === selectedNote.id ? 'Copied' : 'Copy'}
+   472→                    </Button>
+   473→                    <div className="flex-1" />
+   474→                    <Button
+   475→                      size="sm"
+   476→                      variant="ghost"
+   477→                      onClick={() => setDeleteTarget(selectedNote)}
+   478→                      className="h-7 text-xs gap-1 text-destructive hover:text-destructive"
+   479→                    >
+   480→                      <Trash2 className="size-3" /> Delete
+   481→                    </Button>
+   482→                  </>
+   483→                )}
+   484→              </div>
+   485→
+   486→              {/* Note content */}
+   487→              <div className="flex-1 overflow-y-auto p-4">
+   488→                {isEditing ? (
+   489→                  <Textarea
+   490→                    value={editContent}
+   491→                    onChange={(e) => setEditContent(e.target.value)}
+   492→                    className="min-h-full font-mono text-sm resize-none"
+   493→                    placeholder="Write your note in markdown..."
+   494→                  />
+   495→                ) : (
+   496→                  <div
+   497→                    className="prose prose-sm max-w-none dark:prose-invert"
+   498→                  >
+   499→                    <ReactMarkdown>{selectedNote.content}</ReactMarkdown>
+   500→                  </div>
+   501→                )}
+   502→              </div>
+   503→
+   504→              {/* Note footer */}
+   505→              {!isEditing && (
+   506→                <div className="px-4 py-2 border-t text-xs text-muted-foreground flex items-center gap-3 flex-shrink-0">
+   507→                  {getTopicName(selectedNote.topicId) && (
+   508→                    <span className="flex items-center gap-1">
+   509→                      <BookOpen className="size-3" />
+   510→                      {getTopicName(selectedNote.topicId)}
+   511→                    </span>
+   512→                  )}
+   513→                  <span>{new Date(selectedNote.updatedAt).toLocaleString()}</span>
+   514→                </div>
+   515→              )}
+   516→            </div>
+   517→          ) : (
+   518→            /* ── Notes List View ─────────────────────── */
+   519→            <div className="flex-1 flex flex-col min-h-0">
+   520→              {/* Action bar */}
+   521→              <div className="flex items-center gap-2 px-4 py-3 border-b flex-shrink-0">
+   522→                <Button
+   523→                  variant="outline"
+   524→                  size="sm"
+   525→                  onClick={() => setShowNewNote(true)}
+   526→                  className="h-8 text-xs gap-1.5"
+   527→                >
+   528→                  <Plus className="size-3.5" />
+   529→                  <span className="hidden sm:inline">New Note</span>
+   530→                </Button>
+   531→                <Button
+   532→                  size="sm"
+   533→                  onClick={() => setShowGenDialog(true)}
+   534→                  className="h-8 text-xs gap-1.5"
+   535→                >
+   536→                  <Sparkles className="size-3.5" />
+   537→                  <span className="hidden sm:inline">AI Generate</span>
+   538→                </Button>
+   539→                <div className="flex-1" />
+   540→                <Button
+   541→                  variant={showFilters ? 'secondary' : 'ghost'}
+   542→                  size="icon"
+   543→                  className="h-8 w-8"
+   544→                  onClick={() => setShowFilters(!showFilters)}
+   545→                >
+   546→                  <Filter className="size-3.5" />
+   547→                </Button>
+   548→              </div>
+   549→
+   550→              {/* Search & Filter bar */}
+   551→              {(showFilters || searchQuery) && (
+   552→                <div className="flex items-center gap-2 px-4 py-2 border-b flex-shrink-0">
+   553→                  <div className="relative flex-1">
+   554→                    <Search className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   555→                    <Input
+   556→                      value={searchQuery}
+   557→                      onChange={(e) => setSearchQuery(e.target.value)}
+   558→                      placeholder="Search notes..."
+   559→                      className="h-8 text-xs pl-8"
+   560→                    />
+   561→                  </div>
+   562→                  <Select value={filterType} onValueChange={setFilterType}>
+   563→                    <SelectTrigger className="h-8 text-xs w-[120px]">
+   564→                      <SelectValue placeholder="All types" />
+   565→                    </SelectTrigger>
+   566→                    <SelectContent>
+   567→                      <SelectItem value="all">All types</SelectItem>
+   568→                      {Object.entries(noteTypeConfig).map(([key, cfg]) => (
+   569→                        <SelectItem key={key} value={key}>{cfg.label}</SelectItem>
+   570→                      ))}
+   571→                    </SelectContent>
+   572→                  </Select>
+   573→                  {(searchQuery || filterType !== 'all') && (
+   574→                    <Button
+   575→                      variant="ghost"
+   576→                      size="icon"
+   577→                      className="h-8 w-8 shrink-0"
+   578→                      onClick={() => { setSearchQuery(''); setFilterType('all'); }}
+   579→                    >
+   580→                      <X className="size-3.5" />
+   581→                    </Button>
+   582→                  )}
+   583→                </div>
+   584→              )}
+   585→
+   586→              {/* Notes list */}
+   587→              <div className="flex-1 overflow-y-auto">
+   588→                <div className="p-4 space-y-2">
+   589→                  {isLoading ? (
+   590→                    <div className="space-y-2">
+   591→                      {[1, 2, 3, 4].map((i) => (
+   592→                      <Card key={i}>
+   593→                        <CardContent className="p-4">
+   594→                          <Skeleton className="h-4 w-3/4 mb-2" />
+   595→                          <Skeleton className="h-3 w-1/2 mb-1" />
+   596→                          <Skeleton className="h-3 w-1/3" />
+   597→                        </CardContent>
+   598→                      </Card>
+   599→                      ))}
+   600→                    </div>
+   601→                  ) : filteredNotes.length > 0 ? (
+   602→                    <div className="space-y-2">
+   603→                    {filteredNotes.map((note) => (
+   604→                      <Card
+   605→                        key={note.id}
+   606→                        className="cursor-pointer hover:bg-muted/50 transition-colors group"
+   607→                        onClick={() => handleSelectNote(note)}
+   608→                      >
+   609→                        <CardContent className="p-3">
+   610→                          <div className="flex items-start justify-between gap-2">
+   611→                            <div className="flex items-center gap-2.5 min-w-0">
+   612→                              <div className="size-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+   613→                                <FileText className="size-4 text-muted-foreground" />
+   614→                              </div>
+   615→                              <div className="min-w-0">
+   616→                                <div className="flex items-center gap-2">
+   617→                                  <span className="text-sm font-medium truncate">{note.title}</span>
+   618→                                  {note.isAiGenerated && (
+   619→                                    <Sparkles className="size-3 text-primary shrink-0" />
+   620→                                  )}
+   621→                                </div>
+   622→                                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+   623→                                  {note.content.replace(/[#*_`\n]/g, ' ').replace(/\s+/g, ' ').substring(0, 100)}
+   624→                                </p>
+   625→                              </div>
+   626→                            </div>
+   627→                            <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+   628→                              <Badge className={`${noteTypeConfig[note.type]?.color || noteTypeConfig.general.color} border-0 text-[10px] px-1.5`}>
+   629→                                {noteTypeConfig[note.type]?.label || note.type}
+   630→                              </Badge>
+   631→                              <Button
+   632→                                variant="ghost"
+   633→                                size="icon"
+   634→                                className="h-6 w-6 text-muted-foreground"
+   635→                                onClick={(e) => { e.stopPropagation(); setDeleteTarget(note); }}
+   636→                              >
+   637→                                <Trash2 className="size-3" />
+   638→                              </Button>
+   639→                            </div>
+   640→                          </div>
+   641→                          <div className="flex items-center gap-2 mt-1.5 ml-[42px]">
+   642→                            {getTopicName(note.topicId) && (
+   643→                              <span className="text-[11px] text-muted-foreground/70 flex items-center gap-1">
+   644→                                <BookOpen className="size-2.5" />
+   645→                                {getTopicName(note.topicId)}
+   646→                              </span>
+   647→                            )}
+   648→                            <span className="text-[11px] text-muted-foreground/50">
+   649→                              {new Date(note.updatedAt).toLocaleDateString()}
+   650→                            </span>
+   651→                          </div>
+   652→                        </CardContent>
+   653→                      </Card>
+   654→                    ))}
+   655→                    </div>
+   656→                  ) : (
+   657→                    <div className="text-center py-16">
+   658→                      <div className="size-16 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
+   659→                        <FileText className="size-8 text-muted-foreground/40" />
+   660→                      </div>
+   661→                      <p className="text-sm font-medium text-muted-foreground">
+   662→                        {notes && notes.length > 0 ? 'No notes match your search' : 'No notes yet'}
+   663→                      </p>
+   664→                      <p className="text-xs text-muted-foreground/70 mt-1">
+   665→                        {notes && notes.length > 0
+   666→                          ? 'Try adjusting your filters'
+   667→                          : 'Create a note or generate one with AI'}
+   668→                      </p>
+   669→                    </div>
+   670→                  )}
+   671→                </div>
+   672→              </div>
+   673→
+   674→              {/* Notes count */}
+   675→              {notes && notes.length > 0 && !isLoading && (
+   676→                <div className="px-4 py-2 border-t text-xs text-muted-foreground flex-shrink-0">
+   677→                  {filteredNotes.length === notes.length
+   678→                    ? `${notes.length} note${notes.length !== 1 ? 's' : ''}`
+   679→                    : `${filteredNotes.length} of ${notes.length} notes`}
+   680→                </div>
+   681→              )}
+   682→            </div>
+   683→          )}
+   684→        </>
+   685→      )}
+   686→
+   687→      {/* ── New Note Dialog ──────────────────────── */}
+   688→      <Dialog open={showNewNote} onOpenChange={setShowNewNote}>
+   689→        <DialogContent className="sm:max-w-lg">
+   690→          <DialogHeader>
+   691→            <DialogTitle>Create New Note</DialogTitle>
+   692→            <DialogDescription>Write your own study notes in markdown format.</DialogDescription>
+   693→          </DialogHeader>
+   694→          <div className="space-y-4">
+   695→            <div>
+   696→              <Label>Title</Label>
+   697→              <Input
+   698→                value={newTitle}
+   699→                onChange={(e) => setNewTitle(e.target.value)}
+   700→                placeholder="e.g., Chapter 3 - Data Structures"
+   701→                className="mt-1.5"
+   702→                onKeyDown={(e) => { if (e.key === 'Enter' && newTitle.trim()) handleCreateNote(); }}
+   703→              />
+   704→            </div>
+   705→            <div>
+   706→              <Label>Content (Markdown)</Label>
+   707→              <Textarea
+   708→                value={newContent}
+   709→                onChange={(e) => setNewContent(e.target.value)}
+   710→                placeholder="Write your note in markdown...&#10;&#10;## Key Concepts&#10;- Point 1&#10;- Point 2&#10;&#10;### Important Formula&#10;$$E = mc^2$$"
+   711→                className="mt-1.5 min-h-[200px] font-mono text-sm"
+   712→              />
+   713→            </div>
+   714→          </div>
+   715→          <DialogFooter>
+   716→            <Button variant="outline" onClick={() => setShowNewNote(false)}>Cancel</Button>
+   717→            <Button onClick={handleCreateNote} disabled={createMutation.isPending || !newTitle.trim()}>
+   718→              {createMutation.isPending && <Loader2 className="size-4 animate-spin mr-1.5" />}
+   719→              Create Note
+   720→            </Button>
+   721→          </DialogFooter>
+   722→        </DialogContent>
+   723→      </Dialog>
+   724→
+   725→      {/* ── Generate AI Note Dialog ──────────────── */}
+   726→      <Dialog open={showGenDialog} onOpenChange={setShowGenDialog}>
+   727→        <DialogContent className="sm:max-w-lg">
+   728→          <DialogHeader>
+   729→            <DialogTitle className="flex items-center gap-2">
+   730→              <Sparkles className="size-4 text-primary" />
+   731→              Generate AI Notes
+   732→            </DialogTitle>
+   733→            <DialogDescription>AI will create structured study notes based on the topic content and your chat history.</DialogDescription>
+   734→          </DialogHeader>
+   735→          <div className="space-y-4">
+   736→            <div>
+   737→              <Label>Select Topic</Label>
+   738→              <Select value={genTopicId} onValueChange={setGenTopicId}>
+   739→                <SelectTrigger className="mt-1.5">
+   740→                  <SelectValue placeholder="Choose a topic from your syllabus..." />
+   741→                </SelectTrigger>
+   742→                <SelectContent>
+   743→                  {units.map((unit) => (
+   744→                    <div key={unit.id}>
+   745→                      {unit.topics && unit.topics.length > 0 && (
+   746→                        <SelectItem value={`__unit_${unit.id}`} disabled className="text-xs font-semibold text-muted-foreground cursor-default">
+   747→                          ── {unit.title} ──
+   748→                        </SelectItem>
+   749→                      )}
+   750→                      {unit.topics?.map((topic) => (
+   751→                        <SelectItem key={topic.id} value={topic.id} className="pl-6">
+   752→                          {topic.title}
+   753→                        </SelectItem>
+   754→                      ))}
+   755→                    </div>
+   756→                  ))}
+   757→                </SelectContent>
+   758→              </Select>
+   759→            </div>
+   760→            <div>
+   761→              <Label>Note Type</Label>
+   762→              <div className="grid grid-cols-1 gap-2 mt-2">
+   763→                {genTypeOptions.map((opt) => (
+   764→                  <button
+   765→                    key={opt.value}
+   766→                    type="button"
+   767→                    onClick={() => setGenType(opt.value)}
+   768→                    className={`flex items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+   769→                      genType === opt.value
+   770→                        ? 'border-primary bg-primary/5'
+   771→                        : 'border-border hover:bg-muted/50'
+   772→                    }`}
+   773→                  >
+   774→                    <div className={`mt-0.5 size-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+   775→                      genType === opt.value ? 'border-primary' : 'border-muted-foreground/30'
+   776→                    }`}>
+   777→                      {genType === opt.value && <div className="size-2 rounded-full bg-primary" />}
+   778→                    </div>
+   779→                    <div className="min-w-0">
+   780→                      <p className="text-sm font-medium">{opt.label}</p>
+   781→                      <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
+   782→                    </div>
+   783→                  </button>
+   784→                ))}
+   785→              </div>
+   786→            </div>
+   787→          </div>
+   788→          <DialogFooter>
+   789→            <Button variant="outline" onClick={() => setShowGenDialog(false)}>Cancel</Button>
+   790→            <Button
+   791→              onClick={handleStreamGenerate}
+   792→              disabled={!genTopicId || genTopicId.startsWith('__unit_')}
+   793→              className="gap-1.5"
+   794→            >
+   795→              <Sparkles className="size-4" />
+   796→              Generate Notes
+   797→            </Button>
+   798→          </DialogFooter>
+   799→        </DialogContent>
+   800→      </Dialog>
+   801→
+   802→      {/* ── Delete Confirmation ──────────────────── */}
+   803→      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+   804→        <AlertDialogContent>
+   805→          <AlertDialogHeader>
+   806→            <AlertDialogTitle>Delete Note</AlertDialogTitle>
+   807→            <AlertDialogDescription>
+   808→              Are you sure you want to delete &ldquo;{deleteTarget?.title}&rdquo;? This action cannot be undone.
+   809→            </AlertDialogDescription>
+   810→          </AlertDialogHeader>
+   811→          <AlertDialogFooter>
+   812→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   813→            <AlertDialogAction
+   814→              onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget.id); }}
+   815→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   816→            >
+   817→              Delete
+   818→            </AlertDialogAction>
+   819→          </AlertDialogFooter>
+   820→        </AlertDialogContent>
+   821→      </AlertDialog>
+   822→    </div>
+   823→  );
+   824→}
+   825→

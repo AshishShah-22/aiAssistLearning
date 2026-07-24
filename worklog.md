@@ -205,4 +205,67 @@ Added a complete session-based authentication system with cookie-based sessions,
 ### Verified
 ✅ ESLint passes with zero errors
 ✅ All auth API routes compile and serve correctly
-✅ Session cookie set with correct options
+✅ Session cookie set with correct options---
+Task ID: 1
+Agent: Main Agent
+Task: Implement complete notes generation feature with streaming, CRUD, filters
+
+Work Log:
+- Explored full project structure: types, stores, API routes, AI provider, note engine, NotesPanel UI
+- Identified bugs: missing PUT/DELETE handlers, no streaming support, no search/filter
+- Added aiChatStream() to ai-provider.ts with OpenAI-compatible streaming (Groq/OpenAI/DeepSeek) and fallback for ZAI/Google
+- Enhanced note-engine.ts: better exam-focused prompts, chat context injection, streaming generator (generateNotesStream), robust JSON parsing with 3 fallback strategies
+- Updated generate route: SSE streaming support (stream: true), chat context from recent messages, DB save after stream completes
+- Added PUT and DELETE handlers to notes API route
+- Completely rebuilt NotesPanel.tsx: streaming generation with live progress, search + type filter, delete with confirmation, copy to clipboard, edit mode, note detail view with markdown rendering, topic path display, notes count, responsive design
+
+Stage Summary:
+- Notes feature fully functional: create, read, update, delete, AI generate (streaming), search, filter
+- Verified via browser: note list, detail view, streaming generation, dialog with topic/type selection all working
+- No lint errors, no runtime errors in dev logs
+- Files modified: ai-provider.ts, note-engine.ts, ai-engines/index.ts, notes/route.ts, notes/generate/route.ts, NotesPanel.tsx
+
+---
+Task ID: 1
+Agent: Task Agent 1
+Task: Build DocumentsPanel + fix missing API routes
+
+Work Log:
+- Created quiz questions GET route at `src/app/api/notebooks/[id]/quizzes/[quizId]/route.ts`
+- Created flashcard deck GET route at `src/app/api/notebooks/[id]/flashcards/[deckId]/route.ts`
+- Created document DELETE route at `src/app/api/notebooks/[id]/documents/[docId]/route.ts` (needed for delete feature)
+- Built full DocumentsPanel.tsx: upload button, document list with filename/type/size/status/date, delete with AlertDialog confirmation, view content dialog for txt/md files, loading skeletons, empty state, file size formatting
+- Fixed stats API to use `getCurrentUser()` from `@/lib/auth` instead of `DUMMY_USER_ID`
+- Fixed sessions API to use `getCurrentUser()` instead of `DUMMY_USER_ID`
+
+Stage Summary:
+- Created: quizzes/[quizId]/route.ts, flashcards/[deckId]/route.ts, documents/[docId]/route.ts
+- Replaced: DocumentsPanel.tsx (full UI), stats/route.ts (real auth), sessions/route.ts (real auth)
+- All lint passing, no runtime errors in dev logs
+
+---
+Task ID: 2
+Agent: Task Agent 2
+Task: Rebuild AnalyticsPanel with real weekly data
+
+Work Log:
+- Read worklog.md, existing AnalyticsPanel.tsx, progress API, schema, stores for context
+- Created `src/app/api/notebooks/[id]/sessions/weekly/route.ts`: GET endpoint that fetches StudySession records from last 7 days, groups by Mon–Sun, returns `{ days: [{ day, minutes }] }`
+- Rebuilt `src/features/notebook/panels/AnalyticsPanel.tsx`:
+  - Added TanStack Query for weekly sessions data (`/api/notebooks/${notebookId}/sessions/weekly`)
+  - Replaced hardcoded bar chart values with real API data via `weeklyData?.days`
+  - Added empty state for weekly chart (no activity) with styled icon + message
+  - Added "Per-Topic Breakdown" section showing topic-level progress from progress API's `topicProgress` array, with circular % indicator, difficulty badges, parent unit name, mini progress bar, and study time
+  - Applied notebook color theme throughout (stat card icons, progress bars, chart bars, topic indicators)
+  - Added highlight for today's day in the weekly chart
+  - Added weekly total badge in chart header
+  - Used `totalStudyMinutes` from progress API (was using `studyMinutes` before, now correctly uses `totalStudyMinutes`)
+  - Added max-h-96 overflow-y-auto with custom-scrollbar class for topic list scrollability
+  - Added `formatStudyTime()` helper for consistent time formatting (Xh Xm / Xm)
+  - Used lucide icons: CalendarDays, Activity, Layers for new sections
+
+Stage Summary:
+- Created: sessions/weekly/route.ts
+- Replaced: AnalyticsPanel.tsx (real weekly data, per-topic breakdown, empty state, color theme)
+- Lint passes with zero errors
+- No runtime errors in dev logs

@@ -5,4 +5,4 @@ export { analyzeSyllabus } from './syllabus-engine';
 export { generateTutorResponse } from './tutoring-engine';
 export { generateQuiz } from './quiz-engine';
 export { generateFlashcards } from './flashcard-engine';
-export { generateNotes } from './note-engine';
+export { generateNotes, generateNotesStream } from './note-engine';

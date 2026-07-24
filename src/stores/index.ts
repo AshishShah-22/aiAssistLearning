@@ -46,10 +46,7 @@ export const useAppStore = create<AppState>((set) => ({
   currentNotebookId: null,
   sidebarPanel: "chat",
   setView: (view) => set({ view }),
-  openNotebook: (notebookId) => {
-  useChatStore.getState().reset();
-  set({ view: "notebook", currentNotebookId: notebookId, sidebarPanel: "chat" });
-},
+  openNotebook: (notebookId) => set({ view: "notebook", currentNotebookId: notebookId, sidebarPanel: "chat" }),
   setSidebarPanel: (panel) => set({ sidebarPanel: panel }),
   goToDashboard: () => set({ view: "dashboard", currentNotebookId: null }),
 }));

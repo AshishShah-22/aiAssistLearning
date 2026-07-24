@@ -129,12 +129,12 @@ model Chat {
 model Message {
   id        String   @id @default(cuid())
   chatId    String
-  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  role      String
+  role      String   // user | assistant | system
   content   String
-  citations String?
-  images    String?   // JSON array of image URLs for diagrams/illustrations
+  citations String?  // JSON array of citation references
   createdAt DateTime @default(now())
+
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
 
   @@index([chatId])
   @@index([createdAt])

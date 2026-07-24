@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-
-const DUMMY_USER_ID = 'user-1';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function GET() {
   try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userId = user.id;
+
     const [
       totalNotebooks,
       activeNotebooks,
@@ -12,15 +18,15 @@ export async function GET() {
       studySessions,
       quizAttempts,
     ] = await Promise.all([
-      db.notebook.count({ where: { userId: DUMMY_USER_ID } }),
-      db.notebook.count({ where: { userId: DUMMY_USER_ID, status: 'active' } }),
-      db.notebook.count({ where: { userId: DUMMY_USER_ID, status: 'completed' } }),
+      db.notebook.count({ where: { userId } }),
+      db.notebook.count({ where: { userId, status: 'active' } }),
+      db.notebook.count({ where: { userId, status: 'completed' } }),
       db.studySession.findMany({
-        where: { userId: DUMMY_USER_ID },
+        where: { userId },
         select: { duration: true, createdAt: true },
       }),
       db.quizAttempt.findMany({
-        where: { userId: DUMMY_USER_ID },
+        where: { userId },
         select: { score: true, totalQuestions: true, createdAt: true },
       }),
     ]);
@@ -60,7 +66,7 @@ export async function GET() {
     weekAgo.setDate(weekAgo.getDate() - 7);
     const notebooksCreatedThisWeek = await db.notebook.count({
       where: {
-        userId: DUMMY_USER_ID,
+        userId,
         createdAt: { gte: weekAgo },
       },
     });

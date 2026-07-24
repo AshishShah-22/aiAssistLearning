@@ -19,6 +19,16 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -37,6 +47,7 @@ import {
   PenTool,
   Bookmark,
   Loader2,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Resource, ResourceType, Topic, Unit } from '@/types';
@@ -73,6 +84,7 @@ export default function ResourcesPanel() {
   const [formType, setFormType] = useState<ResourceType>('article');
   const [formDescription, setFormDescription] = useState('');
   const [formTopicId, setFormTopicId] = useState<string>('');
+  const [deleteTarget, setDeleteTarget] = useState<Resource | null>(null);
 
   const allTopics: Topic[] = units.flatMap((u) => (u.topics || []).map((t) => ({ ...t, unitTitle: u.title })));
 
@@ -124,6 +136,22 @@ export default function ResourcesPanel() {
     }
     addMutation.mutate();
   };
+
+  const deleteMutation = useMutation({
+    mutationFn: async (resourceId: string) => {
+      const res = await fetch(`/api/notebooks/${notebookId}/resources?resourceId=${resourceId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resources', notebookId] });
+      setDeleteTarget(null);
+      toast.success('Resource deleted');
+    },
+    onError: () => toast.error('Failed to delete resource'),
+  });
 
   // Group resources by topic
   const groupedResources: Record<string, { topic: string | null; resources: Resource[] }> = {};
@@ -210,6 +238,12 @@ export default function ResourcesPanel() {
                               {resource.source && (
                                 <span className="text-xs text-muted-foreground">{resource.source}</span>
                               )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeleteTarget(resource); }}
+                                className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                              </button>
                             </div>
                           </div>
                         </div>
